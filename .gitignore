@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+
+# Local configuration and secrets — never committed
+.env
+.env.*
+!.env.example
+
+# Runtime data: the archive, media, OAuth tokens, WuzAPI session
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+.DS_Store
