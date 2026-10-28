@@ -6,6 +6,10 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-28
+
+The first preview: WuzAPI and wuzapi-mcp on your own computer, your WhatsApp archived and searchable, and Claude Code able to read, search and send. Running on a server for the Claude apps comes next.
+
 ### Added
 - WuzAPI and wuzapi-mcp run together in Docker, reachable from this machine only, with their data on persistent volumes.
 - A status page at http://127.0.0.1:8091: whether WhatsApp is linked, the QR to link it (it follows the code as WhatsApp changes it), the archive's numbers, and the command that connects Claude Code.
