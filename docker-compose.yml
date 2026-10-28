@@ -1,19 +1,22 @@
-# WuzAPI keeps the WhatsApp session. wuzapi-mcp joins this file in a later step.
+# Two services:
+#   wuzapi      keeps the WhatsApp session (a linked device on your account).
+#   wuzapi-mcp  archives every message, serves the status/QR page and the MCP endpoint for Claude.
 #
-# WuzAPI is never exposed to the internet: the only published port is bound to 127.0.0.1,
-# so it is reachable from this machine (pairing, local stdio) and from nowhere else.
+# Published ports are bound to 127.0.0.1: reachable from this machine only, never from the network.
 name: wuzapi-mcp
 
 services:
   wuzapi:
     image: asternic/wuzapi:1.1.0
     # Appended to the image entrypoint. SQLite and the WhatsApp session live in /data.
-    command: ["-datadir=/data", "-color=false"]
+    # -skipmedia: webhooks carry media references only; files are downloaded when Claude asks.
+    command: ["-datadir=/data", "-color=false", "-skipmedia"]
     environment:
       WUZAPI_ADMIN_TOKEN: ${WUZAPI_ADMIN_TOKEN:?set WUZAPI_ADMIN_TOKEN in .env}
       WUZAPI_GLOBAL_ENCRYPTION_KEY: ${WUZAPI_GLOBAL_ENCRYPTION_KEY:?set WUZAPI_GLOBAL_ENCRYPTION_KEY in .env}
       WUZAPI_GLOBAL_HMAC_KEY: ${WUZAPI_GLOBAL_HMAC_KEY:?set WUZAPI_GLOBAL_HMAC_KEY in .env}
-      WUZAPI_GLOBAL_WEBHOOK: ${WUZAPI_GLOBAL_WEBHOOK:-}
+      # Every event goes to wuzapi-mcp, signed with the HMAC key above.
+      WUZAPI_GLOBAL_WEBHOOK: http://wuzapi-mcp:3000/webhook/wuzapi
       WEBHOOK_FORMAT: json
       SESSION_DEVICE_NAME: ${SESSION_DEVICE_NAME:-wuzapi-mcp}
       # Keeps notifications on the phone: the linked device does not mark you as online.
@@ -26,6 +29,37 @@ services:
       - "127.0.0.1:${WUZAPI_HOST_PORT:-8090}:8080"
     restart: unless-stopped
 
+  wuzapi-mcp:
+    build: .
+    depends_on:
+      - wuzapi
+    environment:
+      WUZAPI_URL: http://wuzapi:8080
+      WUZAPI_ADMIN_TOKEN: ${WUZAPI_ADMIN_TOKEN}
+      WUZAPI_USER_NAME: ${WUZAPI_USER_NAME:-owner}
+      WUZAPI_USER_TOKEN: ${WUZAPI_USER_TOKEN:?set WUZAPI_USER_TOKEN in .env}
+      WUZAPI_GLOBAL_HMAC_KEY: ${WUZAPI_GLOBAL_HMAC_KEY}
+      WUZAPI_HISTORY_PER_CHAT: ${WUZAPI_HISTORY_PER_CHAT:-1000}
+      WUZAPI_SYNC_DAYS: ${WUZAPI_SYNC_DAYS:-365}
+      PUBLIC_URL: http://127.0.0.1:${MCP_HOST_PORT:-8091}
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-off}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      WHISPER_URL: ${WHISPER_URL:-}
+      TZ: ${TZ:-UTC}
+      FILES_ROOT: ${HOME}
+      DOWNLOADS_DIR: ${HOME}/Downloads/wuzapi-mcp
+    volumes:
+      - mcp-data:/data
+      # Your home folder, read-only, at the same path: send_file takes the path you would use yourself.
+      - ${HOME}:${HOME}:ro
+      # Downloaded media lands here, on your machine.
+      - ${HOME}/Downloads/wuzapi-mcp:${HOME}/Downloads/wuzapi-mcp
+    ports:
+      - "127.0.0.1:${MCP_HOST_PORT:-8091}:3000"
+    restart: unless-stopped
+
 volumes:
   wuzapi-data:
   wuzapi-files:
+  mcp-data:
