@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -84,8 +85,16 @@ test('signed webhook is archived', async () => {
 });
 
 test('a foreign Host header is refused', async () => {
-  const res = await fetch(`${base}/healthz`, { headers: { Host: 'evil.example' } });
-  assert.equal(res.status, 403);
+  // fetch() always sends the real Host, so this goes through node:http to send a forged one.
+  const status = await new Promise<number>((resolve, reject) => {
+    const req = request(`${base}/healthz`, { headers: { Host: 'evil.example' } }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(status, 403);
 });
 
 test('status endpoint reports the link and the archive', async () => {
