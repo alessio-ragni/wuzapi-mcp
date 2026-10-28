@@ -40,6 +40,9 @@ const fakeWuzapi = {
   async groups() {
     return [];
   },
+  async lidFor() {
+    return null;
+  },
   async conversations() {
     return { chats: [], has_more: false };
   },

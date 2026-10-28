@@ -29,9 +29,7 @@ const checker = setInterval(() => void check(), 60_000);
 // Contact and group names change; refresh them now and then.
 const names = setInterval(() => {
   void session.state({ connect: false }).then(async (s) => {
-    if (!s.loggedIn) return;
-    await session.syncContacts().catch((err) => log('contacts:', err.message));
-    await session.syncGroups().catch((err) => log('groups:', err.message));
+    if (s.loggedIn) await session.refreshNames();
   });
 }, 30 * 60_000);
 

@@ -30,6 +30,8 @@ services:
     restart: unless-stopped
 
   wuzapi-mcp:
+    # The published image. `docker compose up -d --build` builds it from this checkout instead.
+    image: ghcr.io/alessio-ragni/wuzapi-mcp:${WUZAPI_MCP_VERSION:-latest}
     build: .
     depends_on:
       - wuzapi

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Archive, ftsQuery, type ArchivedMessage } from '../src/archive/archive.ts';
-import { ALICE, BOB, GROUP, ME } from './fixtures.ts';
+import { ALICE, ALICE_LID, BOB, GROUP, ME } from './fixtures.ts';
 
 const msg = (over: Partial<ArchivedMessage>): ArchivedMessage => ({
   chatJid: ALICE,
@@ -66,4 +66,39 @@ test('linking a different account wipes the archive; the same account keeps it',
   assert.equal(a.stats().messages, 0);
   assert.equal(a.accountJid(), BOB);
   assert.deepEqual(a.listMessages({ query: 'hello', limit: 5, offset: 0 }), []);
+});
+
+test('a chat filed under a privacy LID merges into the phone-number chat without duplicates', () => {
+  const a = new Archive(':memory:');
+  a.addMessage(msg({ id: 'pn-1', chatJid: ALICE, senderJid: ALICE, timestamp: 100 }));
+  a.addMessage(msg({ id: 'both', chatJid: ALICE, senderJid: ALICE, timestamp: 150 }));
+  a.addMessage(msg({ id: 'lid-1', chatJid: ALICE_LID, senderJid: ALICE_LID, timestamp: 200, text: 'from the lid side' }));
+  a.addMessage(msg({ id: 'both', chatJid: ALICE_LID, senderJid: ALICE_LID, timestamp: 150 }));
+  a.addMessage(msg({ id: 'g-1', chatJid: GROUP, senderJid: ALICE_LID, timestamp: 300 }));
+  a.upsertChat(ALICE_LID, { name: 'Alice (lid)' });
+  a.upsertContact(ALICE_LID, { pushName: 'Ali' });
+  assert.equal(a.stats().unresolved, 1);
+
+  a.recordLid(ALICE, ALICE_LID);
+
+  assert.equal(a.getChat(ALICE_LID), null);
+  assert.equal(a.stats().unresolved, 0);
+  assert.deepEqual(a.listMessages({ chatJid: ALICE, limit: 10, offset: 0 }).map((m) => m.id), ['lid-1', 'both', 'pn-1']);
+  assert.equal(a.getMessage('g-1')?.senderJid, ALICE);
+  assert.equal(a.getChat(ALICE)?.lastMessageAt, 200);
+  assert.equal(a.displayName(ALICE), 'Alice (lid)');
+  assert.deepEqual(a.listMessages({ query: 'lid side', limit: 5, offset: 0 }).map((m) => m.chatJid), [ALICE]);
+});
+
+test('once a LID is known, new messages are filed under the number', () => {
+  const a = new Archive(':memory:');
+  a.recordLid(ALICE, ALICE_LID);
+  assert.equal(a.resolveJid(ALICE_LID), ALICE);
+  assert.equal(a.resolveJid(BOB), BOB);
+  assert.equal(a.canonical(msg({ chatJid: ALICE_LID, senderJid: ALICE_LID })).chatJid, ALICE);
+  a.recordLid(BOB, null);
+  assert.deepEqual([...a.checkedPns(0)].sort(), [ALICE, BOB].sort());
+  a.wipe();
+  assert.equal(a.resolveJid(ALICE_LID), ALICE_LID);
+  assert.equal(a.checkedPns(0).size, 0);
 });

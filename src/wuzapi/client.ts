@@ -194,6 +194,17 @@ export class Wuzapi {
     return this.call<Record<string, ContactInfo>>('GET', '/user/contacts').then((c) => c ?? {});
   }
 
+  /** The privacy LID WhatsApp uses for a phone number, or null when it has none on file. */
+  async lidFor(pnJid: string): Promise<string | null> {
+    try {
+      const data = await this.call<{ lid?: string }>('GET', `/user/lid/${encodeURIComponent(pnJid)}`, { timeoutMs: 5_000 });
+      return data?.lid || null;
+    } catch (err) {
+      if (err instanceof WuzapiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
   groups(): Promise<GroupInfo[]> {
     return this.call<{ Groups: GroupInfo[] | null }>('GET', '/group/list').then((d) => d?.Groups ?? []);
   }

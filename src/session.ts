@@ -26,6 +26,10 @@ export class Session {
   backfillState = 'not started';
   private userReady = false;
   private backfilling = false;
+  private matching = false;
+  private historyAdded = 0;
+  private lastHistoryAt = 0;
+  private namesRefreshed = false;
 
   constructor(config: Config, wuzapi: Wuzapi, archive: Archive) {
     this.config = config;
@@ -87,7 +91,14 @@ export class Session {
   adopt(jid: string): void {
     if (this.archive.claimAccount(jid)) log('a different account is linked: archive wiped');
     if (this.archive.getMeta('backfilled') !== jid) void this.backfill(jid);
-    else if (this.backfillState === 'not started') this.backfillState = 'done';
+    else {
+      if (this.backfillState === 'not started') this.backfillState = 'archive up to date';
+      // Once per start: names and privacy IDs may have changed while we were off.
+      if (!this.namesRefreshed) {
+        this.namesRefreshed = true;
+        void this.refreshNames();
+      }
+    }
   }
 
   /** A new link through the QR: the old archive goes, the phone's history refills it. */
@@ -97,7 +108,35 @@ export class Session {
     this.archive.setMeta('account_jid', jid);
     // History arrives by itself through HistorySync events; nothing stored in WuzAPI is older.
     this.archive.setMeta('backfilled', jid);
-    this.backfillState = 'receiving history from the phone';
+    this.historyAdded = 0;
+    this.lastHistoryAt = Date.now();
+    this.backfillState = 'waiting for the phone’s history';
+    // Names and number↔LID pairs, so the history lands under phone numbers.
+    setTimeout(() => void this.refreshNames(), 5_000);
+  }
+
+  /** A batch of the phone's history was archived. */
+  onHistory(added: number): void {
+    this.historyAdded += added;
+    this.lastHistoryAt = Date.now();
+  }
+
+  /** What the page shows next to "History". */
+  historyStatus(): string {
+    if (this.matching) return 'matching contacts with WhatsApp’s privacy IDs…';
+    if (this.lastHistoryAt) {
+      const quietFor = Date.now() - this.lastHistoryAt;
+      if (quietFor < 120_000) return `receiving history from the phone… ${this.historyAdded.toLocaleString('en')} messages so far`;
+      return `history received: ${this.historyAdded.toLocaleString('en')} messages`;
+    }
+    return this.backfillState;
+  }
+
+  /** Contact names, group names and number↔LID pairs; safe to run often. */
+  async refreshNames(): Promise<void> {
+    await this.syncContacts().catch((err) => log('contacts:', (err as Error).message));
+    await this.syncGroups().catch((err) => log('groups:', (err as Error).message));
+    await this.syncLids().catch((err) => log('privacy IDs:', (err as Error).message));
   }
 
   /** Unlinked from the phone (or by us): delete the archive and every copy WuzAPI kept. */
@@ -105,6 +144,8 @@ export class Session {
     log('unlinked: wiping the archive and WuzAPI’s copy');
     this.archive.wipe();
     this.backfillState = 'not started';
+    this.historyAdded = 0;
+    this.lastHistoryAt = 0;
     try {
       const me = (await this.wuzapi.listUsers()).find((u) => u.token === this.config.WUZAPI_USER_TOKEN);
       if (me) await this.wuzapi.deleteUserCompletely(me.id);
@@ -135,6 +176,38 @@ export class Session {
     return n;
   }
 
+  /**
+   * Asks WuzAPI which privacy LID belongs to each number in the address book, and files every
+   * chat kept under a LID back under the number. Numbers looked up in the last week are skipped.
+   */
+  async syncLids(): Promise<number> {
+    if (this.matching) return 0;
+    this.matching = true;
+    let merged = 0;
+    try {
+      const weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+      const checked = this.archive.checkedPns(weekAgo);
+      const pending = Object.keys(await this.wuzapi.contacts())
+        .map(bareJid)
+        .filter((jid) => jid.endsWith('@s.whatsapp.net') && !checked.has(jid));
+      // A handful at a time: every lookup is a local query inside WuzAPI.
+      const queue = [...pending];
+      const worker = async () => {
+        for (let pn = queue.shift(); pn; pn = queue.shift()) {
+          const lid = await this.wuzapi.lidFor(pn).catch(() => undefined);
+          if (lid === undefined) continue; // transient failure: retried on the next round
+          this.archive.recordLid(pn, lid ? bareJid(lid) : null);
+          if (lid) merged++;
+        }
+      };
+      await Promise.all(Array.from({ length: 8 }, worker));
+      if (pending.length) log(`privacy IDs: ${pending.length} numbers checked, ${merged} matched`);
+      return merged;
+    } finally {
+      this.matching = false;
+    }
+  }
+
   /** Group names, which messages do not carry. */
   async syncGroups(): Promise<number> {
     const groups = await this.wuzapi.groups();
@@ -150,8 +223,7 @@ export class Session {
     let added = 0;
     try {
       this.backfillState = 'importing…';
-      await this.syncContacts().catch((err) => log('contacts:', err.message));
-      await this.syncGroups().catch((err) => log('groups:', err.message));
+      await this.refreshNames();
       let offset = 0;
       for (;;) {
         const page = await this.wuzapi.conversations(offset);
@@ -168,7 +240,7 @@ export class Session {
                 return data ? fromMessageEvent(data, { id: row.message_id, chatJid: row.chat_jid, timestamp: ts }) : null;
               })
               .filter((m) => m !== null)
-              .map((m) => ownSender(m, jid));
+              .map((m) => this.archive.canonical(ownSender(m, jid)));
             added += this.archive.addMessages(messages);
             if (!batch.has_more || batch.next_before === undefined) break;
             before = batch.next_before;

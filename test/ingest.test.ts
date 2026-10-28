@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { Archive } from '../src/archive/archive.ts';
 import { bareJid, fromHistorySync, fromMessageEvent } from '../src/ingest/normalize.ts';
 import { handleEvent, verifySignature } from '../src/ingest/webhook.ts';
-import { ALICE, BOB, GROUP, ME, historySync, liveImage, liveReplyFromLid, liveText, liveVoice } from './fixtures.ts';
+import { ALICE, ALICE_LID, BOB, GROUP, ME, historySync, liveImage, liveReplyFromLid, liveText, liveVoice } from './fixtures.ts';
 
 const KEY = 'k'.repeat(40);
 const noHooks = { onPaired: () => {}, onLoggedOut: () => {} };
@@ -86,4 +86,14 @@ test('pairing and logout reach the session hooks', () => {
   handleEvent(a, { type: 'PairSuccess', event: { ID: '15550000001:3@s.whatsapp.net' } }, hooks);
   handleEvent(a, { type: 'LoggedOut', event: { Reason: 0 } }, hooks);
   assert.deepEqual(seen, [`paired ${ME}`, 'out']);
+});
+
+test('a live message from a known LID with no number attached lands under the number', () => {
+  const a = new Archive(':memory:');
+  a.recordLid(ALICE, ALICE_LID);
+  let history = 0;
+  handleEvent(a, { type: 'Message', event: liveText({ id: 'LID-1', chat: ALICE_LID, sender: ALICE_LID, text: 'hi' }) }, noHooks);
+  assert.equal(a.getMessage('LID-1')?.chatJid, ALICE);
+  handleEvent(a, { type: 'HistorySync', event: { Data: historySync } }, { ...noHooks, onHistory: (n: number) => (history += n) });
+  assert.equal(history, 2);
 });
