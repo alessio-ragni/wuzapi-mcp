@@ -31,12 +31,12 @@ git clone https://github.com/alessio-ragni/wuzapi-mcp.git
 cd wuzapi-mcp
 scripts/init-env.sh        # writes .env with random secrets
 docker compose up -d       # starts WuzAPI, reachable from this machine only
-scripts/pair.sh            # opens the QR page and waits until your phone has scanned it
+scripts/pair.sh            # shows the QR in your browser and waits until your phone has scanned it
 ```
 
 Scan the QR from WhatsApp → Settings → Linked devices → Link a device. Linking asks the phone for up to `WUZAPI_SYNC_DAYS` days of history, and WuzAPI keeps up to `WUZAPI_HISTORY_PER_CHAT` messages per chat.
 
-WuzAPI's port is bound to `127.0.0.1`, so the QR page is only reachable from the machine itself. On a VPS, open it through an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 <your-vps>`) until wuzapi-mcp serves its own password-protected pairing page.
+WuzAPI's port is bound to `127.0.0.1`, so WuzAPI is only reachable from the machine itself. On a VPS, run `scripts/pair.sh` there and open the QR through an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 <your-vps>`) until wuzapi-mcp serves its own password-protected pairing page.
 
 To unlink, remove the device from the phone, or run `docker compose down -v` to drop the session and everything WuzAPI stored.
 

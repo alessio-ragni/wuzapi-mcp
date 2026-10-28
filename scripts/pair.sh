@@ -2,8 +2,11 @@
 # Links your WhatsApp to WuzAPI.
 #
 # Creates the WuzAPI user from .env if it does not exist yet, saves the history settings,
-# starts the session, opens WuzAPI's QR page on this machine and waits until the phone
-# has scanned it. Running it again on a linked account just reports the status.
+# starts the session, shows the QR in a local page that refreshes itself, and waits until
+# the phone has scanned it. Running it again on a linked account just reports the status.
+#
+# WuzAPI's own /login page is not used: in 1.1.0 it reads the status with the wrong field
+# names, says "Connected!" and never shows the QR.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -45,19 +48,39 @@ if logged_in; then
 fi
 
 curl -fsS -o /dev/null "${user[@]}" "${json[@]}" -X POST "$base/session/connect" \
-  --data '{"Subscribe":["Message","HistorySync"],"Immediate":true}' || true
+  --data '{"Subscribe":["Message","HistorySync"],"Immediate":true}' 2>/dev/null || true
 
-page="$base/login/?token=${WUZAPI_USER_TOKEN}"
-echo "Scan the QR with WhatsApp → Settings → Linked devices → Link a device:"
-echo "  $page"
+# A page outside the repository, rewritten every couple of seconds; the browser reloads it.
+page="$(mktemp -d)/pair.html"
+write_page() { # $1 = body
+  printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2">
+<title>Link WhatsApp</title>
+<body style="font-family:system-ui;text-align:center;padding:40px">%s</body>' "$1" > "$page"
+}
+write_page "<p>Waiting for the QR…</p>"
+echo "Scan the QR with WhatsApp → Settings → Linked devices → Link a device."
+echo "  file://$page"
 command -v open >/dev/null && open "$page" || true
 
 for _ in $(seq 1 120); do
   if logged_in; then
+    write_page "<h1>Linked ✓</h1><p>You can close this page.</p>"
     echo "Linked: WhatsApp is connected."
     exit 0
   fi
+  qr=$(curl -fsS "${user[@]}" "$base/session/qr" 2>/dev/null | jq -r '.data.QRCode // empty' || true)
+  if [[ -n "$qr" ]]; then
+    write_page "<h1>Link WhatsApp</h1><p>WhatsApp → Settings → Linked devices → Link a device</p><img src=\"$qr\" width=320 height=320>"
+  else
+    # WhatsApp stops issuing codes after a minute or two; start a fresh round.
+    if ! curl -fsS "${user[@]}" "$base/session/status" | jq -e '.data.connected == true' >/dev/null; then
+      curl -fsS -o /dev/null "${user[@]}" "${json[@]}" -X POST "$base/session/connect" \
+        --data '{"Subscribe":["Message","HistorySync"],"Immediate":true}' 2>/dev/null || true
+    fi
+    write_page "<p>No QR right now — WuzAPI is between codes. This page refreshes by itself.</p>"
+  fi
   sleep 2
 done
-echo "Still not linked after 4 minutes. Reload the page for a fresh QR, then run this again." >&2
+write_page "<p>Timed out. Run <code>scripts/pair.sh</code> again for a fresh QR.</p>"
+echo "Still not linked after 4 minutes. Run scripts/pair.sh again for a fresh QR." >&2
 exit 1

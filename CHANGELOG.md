@@ -9,4 +9,4 @@ All notable changes to wuzapi-mcp are written here. The format follows
 ### Added
 - WuzAPI runs in Docker, bound to this machine only, with its session and data on persistent volumes.
 - `scripts/init-env.sh` writes a `.env` with random secrets; `.env.example` documents every setting.
-- `scripts/pair.sh` links your WhatsApp: it creates the WuzAPI user, keeps the history synced at pairing, opens the QR page and waits until the phone has scanned it.
+- `scripts/pair.sh` links your WhatsApp: it creates the WuzAPI user, keeps the history synced at pairing, shows the QR in a local page and waits until the phone has scanned it.
