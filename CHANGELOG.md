@@ -13,4 +13,8 @@ All notable changes to wuzapi-mcp are written here. The format follows
 - Linking a WhatsApp starts from an empty archive; unlinking, from the page or from the phone, deletes the archive and WuzAPI's copy.
 - MCP tools for Claude Code over HTTP: search contacts, list chats, read and search messages, message context, last interaction, groups; send messages with quoted replies, files, voice notes, reactions and polls; download media; transcribe voice notes.
 - Voice transcription through OpenAI, ElevenLabs or a local Whisper server, off by default.
+- People in your address book are filed under their phone number even when WhatsApp names them by a privacy ID, so one person is one chat. The page shows how many chats are still known only by a privacy ID.
+- The page tells when the phone's history is still arriving and when it is complete, and shows the running version.
+- A ready-made Docker image for amd64 and arm64 is published with every release: `docker compose up -d` downloads it instead of building.
 - `scripts/init-env.sh` writes a `.env` with random secrets and this machine's time zone.
+- Documentation: configuration, architecture, troubleshooting, security and contributing guides.

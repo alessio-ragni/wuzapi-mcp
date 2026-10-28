@@ -55,7 +55,8 @@ export function statusPage(mcpUrl: string): string {
       <dt>Contacts</dt><dd id="contacts">–</dd>
       <dt>From</dt><dd id="oldest">–</dd>
       <dt>Latest</dt><dd id="newest">–</dd>
-      <dt>Import</dt><dd id="backfill">–</dd>
+      <dt>History</dt><dd id="backfill">–</dd>
+      <dt>Without number</dt><dd id="unresolved">–</dd>
     </dl>
   </section>
 
@@ -65,6 +66,7 @@ export function statusPage(mcpUrl: string): string {
     <pre>${addCommand}</pre>
     <p class="sub" style="margin:0">MCP endpoint: <code>${mcpUrl}</code></p>
   </section>
+  <p id="version" class="sub" style="text-align:center"></p>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -108,6 +110,8 @@ async function refresh() {
   $('oldest').textContent = fmt(s.archive.oldest);
   $('newest').textContent = fmt(s.archive.newest);
   $('backfill').textContent = s.backfill;
+  $('unresolved').textContent = num(s.archive.unresolved) + ' chats known only by a privacy ID';
+  $('version').textContent = 'wuzapi-mcp ' + s.version;
 }
 
 $('unlink').addEventListener('click', async () => {

@@ -104,9 +104,17 @@ CREATE TABLE IF NOT EXISTS messages (
   media       TEXT,
   UNIQUE (chat_jid, id)
 );
+-- Phone-number JID → privacy LID, as WuzAPI reports it. lid is NULL when WhatsApp has none on file.
+CREATE TABLE IF NOT EXISTS pn_lid (
+  pn         TEXT PRIMARY KEY,
+  lid        TEXT,
+  checked_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pn_lid_lid ON pn_lid (lid);
 CREATE INDEX IF NOT EXISTS messages_chat_time ON messages (chat_jid, timestamp);
 CREATE INDEX IF NOT EXISTS messages_time ON messages (timestamp);
 CREATE INDEX IF NOT EXISTS messages_id ON messages (id);
+CREATE INDEX IF NOT EXISTS messages_sender ON messages (sender_jid);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5 (
   text, content = 'messages', content_rowid = 'rowid',
@@ -205,9 +213,74 @@ export class Archive {
       DELETE FROM chats;
       DELETE FROM contacts;
       DELETE FROM meta;
+      DELETE FROM pn_lid;
       INSERT INTO messages_fts (messages_fts) VALUES ('rebuild');
     `);
     this.db.exec('VACUUM');
+  }
+
+  // --- privacy LIDs ----------------------------------------------------------
+  //
+  // WhatsApp increasingly names people by a privacy ID ("…@lid") instead of their number.
+  // For people in your address book WuzAPI can tell which LID belongs to which number;
+  // the archive files everything under the number, so one person is one chat.
+
+  /** The phone-number JID behind a LID, when known; any other JID comes back unchanged. */
+  resolveJid(jid: string): string {
+    if (!jid.endsWith('@lid')) return jid;
+    const row = this.db.prepare('SELECT pn FROM pn_lid WHERE lid = ?').get(jid) as { pn: string } | undefined;
+    return row?.pn ?? jid;
+  }
+
+  /** Numbers whose LID was looked up after `since` (unix seconds): no need to ask again. */
+  checkedPns(since: number): Set<string> {
+    const rows = this.db.prepare('SELECT pn FROM pn_lid WHERE checked_at >= ?').all(since) as { pn: string }[];
+    return new Set(rows.map((r) => r.pn));
+  }
+
+  /** Records a lookup and, when there is a LID, moves everything filed under it to the number. */
+  recordLid(pn: string, lid: string | null, now = Math.floor(Date.now() / 1000)): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare('INSERT INTO pn_lid (pn, lid, checked_at) VALUES (?, ?, ?) ON CONFLICT (pn) DO UPDATE SET lid = excluded.lid, checked_at = excluded.checked_at')
+        .run(pn, lid, now);
+      if (lid) this.mergeJid(lid, pn);
+    })();
+  }
+
+  /** Moves messages, chat and contact from one JID to another, keeping one copy of each message. */
+  mergeJid(from: string, to: string): void {
+    const p = { from, to };
+    this.db.prepare('UPDATE OR IGNORE messages SET chat_jid = @to WHERE chat_jid = @from').run(p);
+    this.db.prepare('DELETE FROM messages WHERE chat_jid = @from').run(p);
+    this.db.prepare('UPDATE messages SET sender_jid = @to WHERE sender_jid = @from').run(p);
+    this.db
+      .prepare(
+        `INSERT INTO chats (jid, name, is_group, last_message_at)
+         SELECT @to, name, is_group, last_message_at FROM chats WHERE jid = @from
+         ON CONFLICT (jid) DO UPDATE SET
+           name = COALESCE(chats.name, excluded.name),
+           last_message_at = MAX(COALESCE(chats.last_message_at, 0), COALESCE(excluded.last_message_at, 0))`,
+      )
+      .run(p);
+    this.db.prepare('DELETE FROM chats WHERE jid = @from').run(p);
+    this.db
+      .prepare(
+        `INSERT INTO contacts (jid, name, push_name)
+         SELECT @to, name, push_name FROM contacts WHERE jid = @from
+         ON CONFLICT (jid) DO UPDATE SET
+           name = COALESCE(contacts.name, excluded.name),
+           push_name = COALESCE(contacts.push_name, excluded.push_name)`,
+      )
+      .run(p);
+    this.db.prepare('DELETE FROM contacts WHERE jid = @from').run(p);
+  }
+
+  /** Files a message under phone numbers wherever the LID is known. */
+  canonical(m: ArchivedMessage): ArchivedMessage {
+    const chatJid = this.resolveJid(m.chatJid);
+    const senderJid = this.resolveJid(m.senderJid);
+    return chatJid === m.chatJid && senderJid === m.senderJid ? m : { ...m, chatJid, senderJid };
   }
 
   // --- writing -------------------------------------------------------------
@@ -268,9 +341,10 @@ export class Archive {
 
   // --- reading -------------------------------------------------------------
 
-  stats(): { chats: number; messages: number; contacts: number; oldest: number | null; newest: number | null } {
+  stats(): { chats: number; messages: number; contacts: number; oldest: number | null; newest: number | null; unresolved: number } {
     const one = (sql: string) => (this.db.prepare(sql).get() as { n: number | null }).n;
     return {
+      unresolved: one(`SELECT COUNT(*) AS n FROM chats WHERE jid LIKE '%@lid'`) ?? 0,
       chats: one('SELECT COUNT(*) AS n FROM chats') ?? 0,
       messages: one('SELECT COUNT(*) AS n FROM messages') ?? 0,
       contacts: one('SELECT COUNT(*) AS n FROM contacts') ?? 0,

@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import express, { type Express } from 'express';
+import { readFileSync } from 'node:fs';
 import type { Archive } from '../archive/archive.ts';
 import type { Config } from '../config.ts';
 import { handleEvent, verifySignature } from '../ingest/webhook.ts';
@@ -11,7 +12,7 @@ import { registerWriteTools } from '../tools/write.ts';
 import type { Wuzapi } from '../wuzapi/client.ts';
 import { statusPage } from './page.ts';
 
-export const VERSION = '0.1.0';
+export const VERSION: string = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 
@@ -60,6 +61,7 @@ export function buildApp({ config, archive, wuzapi, session }: AppDeps): Express
     try {
       const outcome = handleEvent(archive, payload, {
         onPaired: (jid) => session.onPaired(jid),
+        onHistory: (added) => session.onHistory(added),
         onLoggedOut: () => void session.onLoggedOut(),
       });
       if (!outcome.startsWith('message')) log('webhook', outcome);
@@ -99,7 +101,7 @@ export function buildApp({ config, archive, wuzapi, session }: AppDeps): Express
 
   app.get('/api/status', async (_req, res) => {
     const whatsapp = await session.state();
-    res.set('Cache-Control', 'no-store').json({ whatsapp, archive: archive.stats(), backfill: session.backfillState });
+    res.set('Cache-Control', 'no-store').json({ whatsapp, archive: archive.stats(), backfill: session.historyStatus(), version: VERSION });
   });
 
   // JSON only: a plain cross-site form cannot send it, so another web page cannot unlink you.

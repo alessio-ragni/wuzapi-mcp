@@ -16,6 +16,8 @@ export function verifySignature(rawBody: Buffer, header: string | undefined, key
 }
 
 export interface IngestHooks {
+  /** A batch of the phone's history arrived; `added` new messages were stored. */
+  onHistory?(added: number): void;
   /** A phone just linked through the QR: a new link always starts from an empty archive. */
   onPaired(jid: string): void;
   /** The device was removed from the phone, or WhatsApp logged it out. */
@@ -49,18 +51,17 @@ export function handleEvent(archive: Archive, payload: Record<string, unknown>, 
         return routine ? 'message: protocol only' : `skipped message (${keys.join(',') || 'no content'})`;
       }
       const info = (event.Info ?? {}) as Record<string, unknown>;
-      if (m.chatJid.endsWith('@g.us') === false && !m.fromMe && m.senderName) {
-        archive.upsertContact(m.senderJid, { pushName: m.senderName });
-      }
-      if (info.IsGroup === true) archive.upsertChat(m.chatJid, { isGroup: true });
-      return archive.addMessage(ownSender(m, account)) ? 'message stored' : 'message already stored';
+      const stored = archive.canonical(ownSender(m, account));
+      if (info.IsGroup === true) archive.upsertChat(stored.chatJid, { isGroup: true });
+      return archive.addMessage(stored) ? 'message stored' : 'message already stored';
     }
     case 'HistorySync': {
       const data = (event.Data ?? event.data ?? {}) as Record<string, unknown>;
       const batch = fromHistorySync(data);
-      for (const c of batch.chats) archive.upsertChat(c.jid, { name: c.name });
-      for (const p of batch.pushNames) archive.upsertContact(p.jid, { pushName: p.name });
-      const added = archive.addMessages(batch.messages.map((m) => ownSender(m, account)));
+      for (const c of batch.chats) archive.upsertChat(archive.resolveJid(c.jid), { name: c.name });
+      for (const p of batch.pushNames) archive.upsertContact(archive.resolveJid(p.jid), { pushName: p.name });
+      const added = archive.addMessages(batch.messages.map((m) => archive.canonical(ownSender(m, account))));
+      hooks.onHistory?.(added);
       return `history sync: ${added} new of ${batch.messages.length} messages, ${batch.chats.length} chats`;
     }
     case 'PairSuccess': {
