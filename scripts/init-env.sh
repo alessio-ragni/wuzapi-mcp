@@ -19,4 +19,10 @@ sed \
   .env.example > .env
 chmod 600 .env
 
-echo "Created .env with random secrets. Next: docker compose up -d && scripts/pair.sh"
+# Show times in your own time zone.
+tz=""
+if [[ -L /etc/localtime ]]; then tz=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||'); fi
+if [[ -z "$tz" && -f /etc/timezone ]]; then tz=$(cat /etc/timezone); fi
+if [[ -n "$tz" ]]; then sed -i.bak "s|^TZ=.*|TZ=$tz|" .env && rm -f .env.bak; fi
+
+echo "Created .env with random secrets. Next: docker compose up -d, then open http://127.0.0.1:8091"

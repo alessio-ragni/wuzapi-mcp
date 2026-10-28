@@ -15,22 +15,24 @@ A public, MIT-licensed MCP server for WhatsApp on top of WuzAPI. See `README.md`
 
 ## Design
 
-- TypeScript, Node ≥ 22, official `@modelcontextprotocol/sdk`, `better-sqlite3` with FTS5, `zod`.
-- One codebase, two entry points: `serve` (webhook receiver + archive writer + Streamable HTTP MCP
-  with a built-in OAuth 2.1 server and an owner-password login page) and `stdio` (same tools for
-  Claude Code, reading the same archive and calling WuzAPI directly).
-- The archive is fed by WuzAPI webhooks (`Message`, `HistorySync`), verified with the HMAC header.
-  Reads go to the archive; writes and media downloads go to WuzAPI's REST API.
+- TypeScript run directly by Node 24 (type stripping, `erasableSyntaxOnly`, no build step), official
+  `@modelcontextprotocol/sdk`, `better-sqlite3` with FTS5, `zod`, `express`.
+- One process, `src/main.ts`: the webhook receiver (`/webhook/wuzapi`, HMAC-verified over the raw
+  body), the archive writer, the status/QR page (`/`, `/api/status`, `/api/unlink`) and the MCP
+  endpoint (`/mcp`, stateless Streamable HTTP). Claude Code connects over HTTP.
+- The archive (`src/archive/`) holds one account. A new link (`PairSuccess`) or an unlink
+  (`LoggedOut`, or the page's button) wipes it; unlinking also deletes the WuzAPI user with its data.
+  On start it imports what WuzAPI already stored (`/chat/conversations`, `/chat/messages`).
+- WuzAPI runs with `-skipmedia`: webhooks carry media references, files are downloaded on request.
+- Locally there is no authentication: everything is bound to `127.0.0.1` and the Host header is
+  checked. Before the server goes on the internet it needs HTTPS and the owner login with OAuth 2.1 —
+  that is the next piece of work, and nothing is exposed until it exists.
 - Tool descriptions state that message content is untrusted third-party text.
-- Voice transcription providers: `openai`, `elevenlabs`, `whisper-local`, `off`.
-- `docker-compose.yml` runs WuzAPI + wuzapi-mcp together.
+- Voice transcription providers: `openai`, `elevenlabs`, `whisper-local`, `off` (default).
 
-## Order of work
+## Tests
 
-1. WuzAPI in Docker, paired by QR. 2. Config, WuzAPI client, webhook + HMAC, SQLite archive.
-3. Read tools over stdio. 4. Write tools (send, quoted reply, react, file, voice, groups, polls).
-5. Media + transcription. 6. HTTP + OAuth, tested with MCP Inspector and a temporary tunnel.
-7. README, `.env.example`, CI (typecheck + unit tests on fixtures).
+`npm run typecheck` and `npm test` (Node's test runner, invented fixtures in `test/fixtures.ts`).
 
 ## Shipping
 

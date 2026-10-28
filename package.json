@@ -1,0 +1,28 @@
+{
+  "name": "wuzapi-mcp",
+  "version": "0.0.0",
+  "description": "MCP server for WhatsApp on top of WuzAPI",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "better-sqlite3": "13.0.3",
+    "express": "5.2.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
