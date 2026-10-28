@@ -162,6 +162,8 @@ export class Archive {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    // Status updates were archived by the first builds; they are not conversations.
+    this.db.exec(`DELETE FROM messages WHERE chat_jid = 'status@broadcast'; DELETE FROM chats WHERE jid = 'status@broadcast';`);
   }
 
   close(): void {

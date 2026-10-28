@@ -25,7 +25,7 @@ export function statusPage(mcpUrl: string): string {
   dt { color:var(--muted); }
   dd { margin:0; font-variant-numeric:tabular-nums; }
   code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px; }
-  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-all; margin:8px 0; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; white-space:pre; overflow-x:auto; margin:8px 0; }
   button { font:inherit; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); padding:8px 14px; cursor:pointer; }
   button.danger { border-color:var(--bad); color:var(--bad); }
   .hidden { display:none; }

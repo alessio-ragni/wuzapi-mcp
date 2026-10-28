@@ -50,6 +50,10 @@ test('image keeps its caption and what is needed to download it', () => {
   assert.equal(m.media?.fileLength, 1234);
 });
 
+test('status updates are not archived', () => {
+  assert.equal(fromMessageEvent(liveText({ id: 'S1', chat: 'status@broadcast', text: 'my story' })), null);
+});
+
 test('voice notes are told apart from other audio', () => {
   assert.equal(fromMessageEvent(liveVoice)?.type, 'voice');
 });

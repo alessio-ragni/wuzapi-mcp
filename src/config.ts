@@ -6,7 +6,7 @@ const schema = z.object({
   WUZAPI_USER_NAME: z.string().min(1).default('owner'),
   WUZAPI_USER_TOKEN: z.string().min(16),
   WUZAPI_GLOBAL_HMAC_KEY: z.string().min(32),
-  WUZAPI_HISTORY_PER_CHAT: z.coerce.number().int().min(0).default(1000),
+  WUZAPI_HISTORY_PER_CHAT: z.coerce.number().int().min(0).default(0),
   WUZAPI_SYNC_DAYS: z.coerce.number().int().min(0).max(365).default(365),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),

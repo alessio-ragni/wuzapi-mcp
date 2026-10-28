@@ -30,6 +30,7 @@ const fakeWuzapi = {
     return { connected: true, loggedIn: true, jid: '15550000001:4@s.whatsapp.net', name: 'owner', events: '' };
   },
   async connect() {},
+  async setHistory() {},
   async qr() {
     return null;
   },

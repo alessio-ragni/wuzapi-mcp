@@ -27,6 +27,9 @@ export function bareJid(jid: string): string {
   return `${user!.split(':')[0]}@${server}`;
 }
 
+/** Status updates (other people's stories) are not conversations. */
+export const isStatus = (jid: string) => jid === 'status@broadcast';
+
 const isPn = (jid: string | undefined): jid is string => !!jid && jid.endsWith('@s.whatsapp.net');
 
 /** Prefers the phone-number JID over the privacy LID when WhatsApp gives both. */
@@ -134,7 +137,7 @@ export function fromMessageEvent(event: Obj, fallback: { id?: string; chatJid?: 
 
   const rawChat = str(info.Chat) ?? fallback.chatJid;
   const id = str(info.ID) ?? fallback.id;
-  if (!rawChat || !id) return null;
+  if (!rawChat || !id || isStatus(rawChat)) return null;
   const fromMe = info.IsFromMe === true;
   const isGroup = info.IsGroup === true || rawChat.endsWith('@g.us');
 
@@ -164,7 +167,7 @@ export function fromWebMessage(web: Obj, conversationJid?: string): ArchivedMess
 
   const rawChat = str(key.remoteJID) ?? str(key.remoteJid) ?? conversationJid;
   const id = str(key.ID) ?? str(key.id);
-  if (!rawChat || !id) return null;
+  if (!rawChat || !id || isStatus(rawChat)) return null;
   const fromMe = key.fromMe === true;
   const isGroup = rawChat.endsWith('@g.us');
   const participant = str(key.participant) ?? str(web.participant);
@@ -196,7 +199,7 @@ export function fromHistorySync(data: Obj): HistoryBatch {
   for (const c of conversations) {
     if (!isObj(c)) continue;
     const id = str(c.ID) ?? str(c.id);
-    if (!id) continue;
+    if (!id || isStatus(id)) continue;
     // A direct chat may be keyed by its privacy LID; the phone-number JID is kept alongside.
     const pn = str(c.pnJID) ?? str(c.pnJid);
     const jid = id.endsWith('@lid') && isPn(pn) ? bareJid(pn) : bareJid(id);

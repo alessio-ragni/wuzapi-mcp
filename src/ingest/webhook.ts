@@ -22,6 +22,12 @@ export interface IngestHooks {
   onLoggedOut(): void;
 }
 
+/** Message parts that carry no content of their own: key exchange, reactions, edits/deletes, votes. */
+const ROUTINE = new Set([
+  'messageContextInfo', 'senderKeyDistributionMessage', 'protocolMessage', 'reactionMessage',
+  'pollUpdateMessage', 'keepInChatMessage', 'encReactionMessage',
+]);
+
 /** Fills in "me" with the linked account, so replies to your own messages can name you. */
 export function ownSender(m: ArchivedMessage, account: string | null): ArchivedMessage {
   return m.senderJid === 'me' && account ? { ...m, senderJid: account } : m;
@@ -36,7 +42,12 @@ export function handleEvent(archive: Archive, payload: Record<string, unknown>, 
   switch (type) {
     case 'Message': {
       const m = fromMessageEvent(event);
-      if (!m) return 'message ignored (not archived content)';
+      if (!m) {
+        // Field names only, never content: enough to see what kind of message was skipped.
+        const keys = Object.keys((event.Message ?? {}) as Record<string, unknown>);
+        const routine = keys.every((k) => ROUTINE.has(k));
+        return routine ? 'message: protocol only' : `skipped message (${keys.join(',') || 'no content'})`;
+      }
       const info = (event.Info ?? {}) as Record<string, unknown>;
       if (m.chatJid.endsWith('@g.us') === false && !m.fromMe && m.senderName) {
         archive.upsertContact(m.senderJid, { pushName: m.senderName });

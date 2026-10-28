@@ -167,6 +167,11 @@ export class Wuzapi {
     return data?.QRCode || null;
   }
 
+  /** How many messages per chat WuzAPI keeps, and how many days of history a new link asks the phone for. */
+  setHistory(history: number, days: number): Promise<unknown> {
+    return this.call('POST', '/session/history', { body: { history, days_to_sync_history: days } });
+  }
+
   logout(): Promise<unknown> {
     return this.call('POST', '/session/logout');
   }

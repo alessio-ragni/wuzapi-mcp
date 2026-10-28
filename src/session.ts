@@ -2,7 +2,7 @@ import type { Archive } from './archive/archive.ts';
 import type { Config } from './config.ts';
 import { fromMessageEvent, bareJid } from './ingest/normalize.ts';
 import { ownSender } from './ingest/webhook.ts';
-import { EVENTS, type Wuzapi } from './wuzapi/client.ts';
+import { EVENTS, WuzapiError, type Wuzapi } from './wuzapi/client.ts';
 
 export interface WhatsAppState {
   reachable: boolean;
@@ -52,6 +52,7 @@ export class Session {
         log('subscribed WuzAPI user to', EVENTS.join(','));
       }
     }
+    await this.wuzapi.setHistory(this.config.WUZAPI_HISTORY_PER_CHAT, this.config.WUZAPI_SYNC_DAYS);
     this.userReady = true;
   }
 
@@ -181,6 +182,12 @@ export class Session {
       this.backfillState = `done: ${added} messages from ${chats} chats`;
       log('backfill', this.backfillState);
     } catch (err) {
+      if (err instanceof WuzapiError && err.status === 501) {
+        // WuzAPI keeps no history of its own (WUZAPI_HISTORY_PER_CHAT=0): nothing to import.
+        this.archive.setMeta('backfilled', jid);
+        this.backfillState = 'nothing to import: history arrives from the phone when it links';
+        return;
+      }
       this.backfillState = `failed: ${(err as Error).message} (retries on next check)`;
       log('backfill failed:', (err as Error).message);
     } finally {
