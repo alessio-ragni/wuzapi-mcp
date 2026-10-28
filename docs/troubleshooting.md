@@ -67,9 +67,11 @@ wuzapi-mcp works around these in WuzAPI 1.1.0; they are reported upstream.
 - **History is not stored on SQLite.** With `history` > 0, every save fails with
   `no such table: whatsmeow_message_secrets`, so WuzAPI keeps no copy to import later. wuzapi-mcp
   sets `history` to 0 and relies on the phone's history at link time.
+  ([asternic/wuzapi#393](https://github.com/asternic/wuzapi/issues/393))
 - **The `/login` page never shows the QR.** It reads `LoggedIn`/`Connected` from the status, which
   WuzAPI returns as `loggedIn`/`connected`, and says "Connected!" while nothing is linked.
   wuzapi-mcp's own page shows the QR.
+  ([asternic/wuzapi#394](https://github.com/asternic/wuzapi/issues/394))
 
 ## Starting over
 
