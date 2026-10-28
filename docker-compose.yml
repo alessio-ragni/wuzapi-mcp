@@ -1,0 +1,31 @@
+# WuzAPI keeps the WhatsApp session. wuzapi-mcp joins this file in a later step.
+#
+# WuzAPI is never exposed to the internet: the only published port is bound to 127.0.0.1,
+# so it is reachable from this machine (pairing, local stdio) and from nowhere else.
+name: wuzapi-mcp
+
+services:
+  wuzapi:
+    image: asternic/wuzapi:1.1.0
+    # Appended to the image entrypoint. SQLite and the WhatsApp session live in /data.
+    command: ["-datadir=/data", "-color=false"]
+    environment:
+      WUZAPI_ADMIN_TOKEN: ${WUZAPI_ADMIN_TOKEN:?set WUZAPI_ADMIN_TOKEN in .env}
+      WUZAPI_GLOBAL_ENCRYPTION_KEY: ${WUZAPI_GLOBAL_ENCRYPTION_KEY:?set WUZAPI_GLOBAL_ENCRYPTION_KEY in .env}
+      WUZAPI_GLOBAL_HMAC_KEY: ${WUZAPI_GLOBAL_HMAC_KEY:?set WUZAPI_GLOBAL_HMAC_KEY in .env}
+      WUZAPI_GLOBAL_WEBHOOK: ${WUZAPI_GLOBAL_WEBHOOK:-}
+      WEBHOOK_FORMAT: json
+      SESSION_DEVICE_NAME: ${SESSION_DEVICE_NAME:-wuzapi-mcp}
+      # Keeps notifications on the phone: the linked device does not mark you as online.
+      WUZAPI_AUTO_PRESENCE: unavailable
+      TZ: ${TZ:-UTC}
+    volumes:
+      - wuzapi-data:/data
+      - wuzapi-files:/app/files
+    ports:
+      - "127.0.0.1:${WUZAPI_HOST_PORT:-8090}:8080"
+    restart: unless-stopped
+
+volumes:
+  wuzapi-data:
+  wuzapi-files:

@@ -31,3 +31,8 @@ A public, MIT-licensed MCP server for WhatsApp on top of WuzAPI. See `README.md`
 3. Read tools over stdio. 4. Write tools (send, quoted reply, react, file, voice, groups, polls).
 5. Media + transcription. 6. HTTP + OAuth, tested with MCP Inspector and a temporary tunnel.
 7. README, `.env.example`, CI (typecheck + unit tests on fixtures).
+
+## Shipping
+
+Everything leaves through `/release` (`.claude/skills/release/`): checks, secret scan, commit,
+push, changelog closed into a version, tag, GitHub Release. Never push by hand around it.
