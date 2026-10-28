@@ -36,7 +36,7 @@ curl -fsS -o /dev/null "${user[@]}" "${json[@]}" -X POST "$base/session/history"
     '{history: $h, days_to_sync_history: $d}')"
 
 logged_in() {
-  curl -fsS "${user[@]}" "$base/session/status" | jq -e '.data.LoggedIn == true' >/dev/null
+  curl -fsS "${user[@]}" "$base/session/status" | jq -e '(.data.loggedIn // .data.LoggedIn) == true' >/dev/null
 }
 
 if logged_in; then
