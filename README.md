@@ -1,62 +1,85 @@
+<div align="center">
+
 # wuzapi-mcp
 
-Your personal WhatsApp, inside your AI assistant. An [MCP](https://modelcontextprotocol.io) server
-built on top of [WuzAPI](https://github.com/asternic/wuzapi): it works with any MCP client — Claude
-Code, Claude Desktop, Gemini CLI, Codex, Cursor, VS Code and the others.
+### Your WhatsApp, inside your AI assistant.
 
-Ask your assistant to find what someone said last spring, summarise a group you muted, reply to a
-message quoting it, send a file or a voice note, react, run a poll and see who voted, or create a
-group with the people who said yes — from your own archive, on your own machine.
+Search years of chats in a second, catch up on the groups you muted, see who answered your poll,
+reply, send files and voice notes, and set up a group — just by asking.
+**Private by design: everything runs on your own computer.**
 
-> **Preview (0.x).** It runs on your own computer and the MCP clients on that computer use it.
-> Running it on a server for the web and mobile apps (ChatGPT, claude.ai, Gemini — they need HTTPS
-> and a login) is the next step and is not in this version.
+[![Release](https://img.shields.io/github/v/release/alessio-ragni/wuzapi-mcp?include_prereleases&sort=semver)](https://github.com/alessio-ragni/wuzapi-mcp/releases)
+[![CI](https://github.com/alessio-ragni/wuzapi-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/alessio-ragni/wuzapi-mcp/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/alessio-ragni/wuzapi-mcp/pkgs/container/wuzapi-mcp)
+[![MCP](https://img.shields.io/badge/MCP-any%20client-8A2BE2)](https://modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## How it fits together
+Works with **Claude Code · Claude Desktop · Gemini CLI · Codex · Cursor · VS Code** — any MCP client.
 
-```
-WhatsApp ⇄ WuzAPI ──signed webhooks──▶ wuzapi-mcp ── archive (SQLite, full-text search)
-                  ◀──────REST────────       │
-                                      status/QR page · MCP over HTTP
-                                              │
-                                 your MCP client (Claude Code, Gemini CLI, Cursor…)
-```
+</div>
 
-- **WuzAPI** holds the WhatsApp session: it joins your account as a linked device, like WhatsApp
-  Web. It is used as is, unmodified.
-- **wuzapi-mcp** archives every message WuzAPI forwards, shows a page with the link status and the
-  QR, and gives your MCP client the tools below.
+---
 
-Both run in Docker on your machine. There is no central service: nothing leaves your computer
-except what your assistant reads through a tool you allowed. One installation holds one WhatsApp account.
+## Just ask
 
-## Install
+> **You:** What did Marco say about the flat in Bologna? It was sometime last spring.
+>
+> **Assistant:** On 14 April Marco wrote that the landlord would lower the rent to €850 if you sign
+> for two years, and asked you to call him before Friday.
 
-You need [Docker](https://docs.docker.com/get-docker/) and `openssl`.
+> **You:** Summarise the five-a-side group from this week, I muted it.
+>
+> **Assistant:** The match moves to Sunday at 10, Luca can't make it, and the pitch is already paid.
+> Two people asked who brings the ball — nobody answered.
+
+> **You:** Who said yes to my poll about the barbecue? Make a group with them and send the
+> invitation.
+>
+> **Assistant:** Seven yes, two no, four haven't voted. I created *Barbecue 21 June* with the seven
+> and posted the invitation. Want me to remind the four who haven't answered?
+
+<sub>Invented examples. Your assistant asks before every message it sends.</sub>
+
+## Why you'll like it
+
+- 🔎 **Your whole history, searchable.** Every message is archived as it arrives, plus up to a year
+  of history from your phone. Full-text search that ignores accents: `caffe` finds *caffè*.
+- 🗳️ **Polls and groups, handled.** See who voted what and who hasn't yet, create a group with the
+  people who said yes, make someone admin, share the invite link.
+- ✍️ **It writes back.** Text replies that quote the original, photos, documents, voice notes,
+  reactions, polls.
+- 🎙️ **Voice notes become text** — through OpenAI, ElevenLabs or Whisper running locally, if you
+  want it.
+- 🔒 **Local-first.** No cloud service in the middle and no account to create. Your archive lives on
+  your machine; your assistant only sees what it reads through a tool you allowed.
+- 🧩 **Any MCP client.** One server for every assistant you use, today and tomorrow.
+- 🐳 **Three commands to install.** A ready-made Docker image for Mac, Linux and servers: nothing to
+  compile, no Go or Python toolchain.
+
+## Get started in two minutes
+
+You need [Docker](https://docs.docker.com/get-docker/).
 
 ```bash
-git clone https://github.com/alessio-ragni/wuzapi-mcp.git
-cd wuzapi-mcp
-scripts/init-env.sh        # writes .env: random secrets and your time zone
-docker compose up -d       # downloads and starts WuzAPI and wuzapi-mcp
+git clone https://github.com/alessio-ragni/wuzapi-mcp.git && cd wuzapi-mcp
+scripts/init-env.sh        # creates your private settings
+docker compose up -d       # starts everything
 ```
 
-Open **http://127.0.0.1:8091**, then on your phone go to WhatsApp → Settings → Linked devices →
-Link a device and scan the QR. The page turns to *Linked* and the archive fills up while the phone
-sends its history — up to a year, over a few minutes.
-
-Then connect Claude Code once (the page shows the same line):
+1. Open **http://127.0.0.1:8091**.
+2. On your phone: WhatsApp → Settings → Linked devices → *Link a device*, and scan the QR.
+3. Connect your assistant:
 
 ```bash
 claude mcp add --transport http --scope user whatsapp http://127.0.0.1:8091/mcp
 ```
 
-Open a new Claude Code session and ask *"my latest WhatsApp chats"*.
+Ask *"what are my latest WhatsApp chats?"*. That's it.
 
-### Other MCP clients
+<details>
+<summary><b>Gemini CLI, Codex, Cursor, VS Code, Claude Desktop</b></summary>
 
-The server speaks MCP over Streamable HTTP at `http://127.0.0.1:8091/mcp`, so any client on the
-same computer can use it:
+The server speaks MCP over Streamable HTTP at `http://127.0.0.1:8091/mcp`:
 
 | Client | Where | What to add |
 |---|---|---|
@@ -66,12 +89,29 @@ same computer can use it:
 | VS Code (Copilot) | `.vscode/mcp.json` | `"servers": { "whatsapp": { "type": "http", "url": "http://127.0.0.1:8091/mcp" } }` |
 | Claude Desktop | `claude_desktop_config.json` | `"mcpServers": { "whatsapp": { "command": "npx", "args": ["mcp-remote", "http://127.0.0.1:8091/mcp"] } }` |
 
-ChatGPT, claude.ai and the Gemini app run in the cloud and cannot reach your computer's
-`127.0.0.1`: they need the server version with a public HTTPS address and a login, which is not in
-this release.
+</details>
 
-Both ports are bound to `127.0.0.1`: the page and the MCP endpoint answer to your computer only,
-which is why there is no password. Do not publish them on a network.
+> **Preview (0.x).** Today it serves the assistants on the same computer. The cloud apps —
+> ChatGPT, claude.ai, the Gemini app — need a public HTTPS address with a login: that hosted mode
+> is the next milestone.
+
+## How it works
+
+```
+WhatsApp ⇄ WuzAPI ──signed webhooks──▶ wuzapi-mcp ── your archive (SQLite, full-text search)
+                  ◀──────REST────────       │
+                                      status page · MCP over HTTP
+                                              │
+                                 your assistant (Claude, Gemini, Cursor…)
+```
+
+- **[WuzAPI](https://github.com/asternic/wuzapi)** keeps your WhatsApp session, as a linked device
+  — like WhatsApp Web. Used as is, unmodified.
+- **wuzapi-mcp** archives every message, shows the link status and the QR, and gives your assistant
+  its tools.
+
+Both run in Docker and answer only to your own computer (`127.0.0.1`), which is why there is no
+password. Do not publish those ports on a network. One installation, one WhatsApp account.
 
 ## Tools
 
@@ -79,21 +119,26 @@ which is why there is no password. Do not publish them on a network.
 |---|---|---|
 | `search_contacts`, `list_chats`, `get_chat`, `list_messages`, `search_messages`, `get_message_context`, `get_last_interaction`, `list_groups`, `get_group_info`, `get_poll_results` | `send_message` (with quoted reply), `send_file`, `send_voice`, `react`, `create_poll`, `create_group`, `update_group_participants`, `get_group_invite_link` | `download_media`, `transcribe_voice` |
 
+<details>
+<summary>Details</summary>
+
 - Times are shown in your time zone; dates can be given as `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
 - `send_file` and `send_voice` take the path of a file on your computer (your home folder is mounted
   read-only for that). Any audio format works for voice notes; WuzAPI converts it.
 - `download_media` saves into `~/Downloads/wuzapi-mcp` and returns the path.
 - `get_poll_results` lists who voted what and, in a group, who has not voted yet. Votes are kept
-  from the moment they arrive; it also asks the phone for older ones, which works only while the
-  phone still has them to send.
+  from the moment they arrive; it can also ask the phone for older ones, but the phone only sends
+  messages older than the chat's latest, so a poll that is still the last message cannot be fetched.
 - `create_group` makes you the owner and can name admins. WhatsApp does not let you add people
   whose privacy settings allow only their own contacts to add them: the tool lists them, and
   `get_group_invite_link` gives the link to send them instead.
 - `transcribe_voice` is off until you choose a provider — see
   [configuration](docs/configuration.md#voice-transcription).
 
-Claude Code (and most clients) ask before each tool call unless you allow it; keep that on for the
-sending and group tools.
+Most clients ask before each tool call unless you allow it; keep that on for the sending and group
+tools.
+
+</details>
 
 ## The archive
 
@@ -106,7 +151,7 @@ sending and group tools.
   removing the device on your phone — deletes the archive and everything WuzAPI kept.
 - Restarting the computer or the containers keeps everything.
 - Photos, videos, voice notes and documents are not copied in advance; they are downloaded when
-  Claude asks for one.
+  your assistant asks for one.
 
 ## Update
 
@@ -157,10 +202,19 @@ WhatsApp does not tell.
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
 
+## Roadmap
+
+- [x] Local archive with full-text search, sending, media, voice transcription
+- [x] Polls and groups
+- [ ] Hosted mode: a server with HTTPS and a login, for ChatGPT, claude.ai and phone apps
+
+Ideas and bug reports are welcome in [Issues](https://github.com/alessio-ragni/wuzapi-mcp/issues).
+If it saves you time, a ⭐ helps others find it.
+
 ## Credits
 
 The tool set is inspired by [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp),
-which showed how good WhatsApp feels inside Claude. The WhatsApp side is entirely
+which showed how good WhatsApp feels inside an assistant. The WhatsApp side is entirely
 [WuzAPI](https://github.com/asternic/wuzapi) and [whatsmeow](https://github.com/tulir/whatsmeow).
 
 ## License

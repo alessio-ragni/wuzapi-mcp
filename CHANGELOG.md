@@ -9,9 +9,10 @@ All notable changes to wuzapi-mcp are written here. The format follows
 ### Added
 - Poll results: `get_poll_results` shows who voted what, with names and numbers, and in a group who has not voted yet. Votes are kept as they arrive and read from the history the phone sends; a changed vote replaces the old one.
 - Groups: `create_group` creates a group with admins of your choice and lets every member add people, `update_group_participants` adds, removes, promotes and demotes, and `get_group_invite_link` gives the link for people whose privacy settings block being added.
-- The README shows how to connect Gemini CLI, Codex, Cursor, VS Code and Claude Desktop, not only Claude Code: any MCP client on the same computer works.
+- A new README: what you can ask, why it is worth it, a two-minute start, and how to connect Gemini CLI, Codex, Cursor, VS Code and Claude Desktop as well as Claude Code — any MCP client on the same computer works.
 
 ### Changed
+- `get_poll_results` explains when older votes cannot be fetched from the phone, instead of listing the whole group as not having voted.
 - `get_group_info` shows names from your archive for members WhatsApp lists only by number, and who can add members.
 
 ## [0.1.0] - 2026-10-28
