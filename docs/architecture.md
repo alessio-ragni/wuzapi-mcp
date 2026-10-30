@@ -79,6 +79,15 @@ whenever it can:
 
 People outside your address book stay under their privacy ID, with the name they chose.
 
+## Poll votes
+
+WhatsApp encrypts votes. WuzAPI decrypts each one and adds it to the `Message` webhook as
+`pollVote`, with the chosen options as SHA-256 hashes of their text. wuzapi-mcp keeps every poll's
+options and each person's latest vote, and matches the hashes back to the options when asked. The
+phone also attaches the votes to a poll when it sends history, so `get_poll_results` can ask for
+the chat's recent history to fill in votes cast before they were kept. That is up to the phone,
+and it may send nothing.
+
 ## What is stored where
 
 | Where | What |

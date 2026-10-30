@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Archive, ArchivedMessage } from '../archive/archive.ts';
-import { bareJid, fromHistorySync, fromMessageEvent } from './normalize.ts';
+import { bareJid, fromHistorySync, fromMessageEvent, readPoll, voteFromEvent } from './normalize.ts';
 
 /** WuzAPI signs every webhook body with HMAC-SHA256 and sends it, lowercase hex, in `x-hmac-signature`. */
 export function verifySignature(rawBody: Buffer, header: string | undefined, key: string): boolean {
@@ -24,10 +24,10 @@ export interface IngestHooks {
   onLoggedOut(): void;
 }
 
-/** Message parts that carry no content of their own: key exchange, reactions, edits/deletes, votes. */
+/** Message parts that carry no content of their own: key exchange, reactions, edits/deletes. */
 const ROUTINE = new Set([
   'messageContextInfo', 'senderKeyDistributionMessage', 'protocolMessage', 'reactionMessage',
-  'pollUpdateMessage', 'keepInChatMessage', 'encReactionMessage',
+  'keepInChatMessage', 'encReactionMessage',
 ]);
 
 /** Fills in "me" with the linked account, so replies to your own messages can name you. */
@@ -43,6 +43,8 @@ export function handleEvent(archive: Archive, payload: Record<string, unknown>, 
 
   switch (type) {
     case 'Message': {
+      const vote = voteFromEvent(payload);
+      if (vote) return archive.recordVote(vote) ? 'message: poll vote stored' : 'message: older poll vote';
       const m = fromMessageEvent(event);
       if (!m) {
         // Field names only, never content: enough to see what kind of message was skipped.
@@ -53,6 +55,8 @@ export function handleEvent(archive: Archive, payload: Record<string, unknown>, 
       const info = (event.Info ?? {}) as Record<string, unknown>;
       const stored = archive.canonical(ownSender(m, account));
       if (info.IsGroup === true) archive.upsertChat(stored.chatJid, { isGroup: true });
+      const poll = m.type === 'poll' ? readPoll(event.Message as Record<string, unknown>) : null;
+      if (poll) archive.recordPoll({ id: stored.id, chatJid: stored.chatJid, ...poll });
       return archive.addMessage(stored) ? 'message stored' : 'message already stored';
     }
     case 'HistorySync': {
@@ -61,8 +65,11 @@ export function handleEvent(archive: Archive, payload: Record<string, unknown>, 
       for (const c of batch.chats) archive.upsertChat(archive.resolveJid(c.jid), { name: c.name });
       for (const p of batch.pushNames) archive.upsertContact(archive.resolveJid(p.jid), { pushName: p.name });
       const added = archive.addMessages(batch.messages.map((m) => archive.canonical(ownSender(m, account))));
+      for (const p of batch.polls) archive.recordPoll({ ...p, chatJid: archive.resolveJid(p.chatJid) });
+      let votes = 0;
+      for (const v of batch.votes) if (archive.recordVote(v)) votes++;
       hooks.onHistory?.(added);
-      return `history sync: ${added} new of ${batch.messages.length} messages, ${batch.chats.length} chats`;
+      return `history sync: ${added} new of ${batch.messages.length} messages, ${batch.chats.length} chats, ${votes} poll votes`;
     }
     case 'PairSuccess': {
       const jid = typeof event.ID === 'string' ? bareJid(event.ID) : null;
