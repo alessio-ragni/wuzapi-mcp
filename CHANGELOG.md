@@ -6,6 +6,8 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
 ### Added
 - Poll results: `get_poll_results` shows who voted what, with names and numbers, and in a group who has not voted yet. Votes are kept as they arrive and read from the history the phone sends; a changed vote replaces the old one.
 - Groups: `create_group` creates a group with admins of your choice and lets every member add people, `update_group_participants` adds, removes, promotes and demotes, and `get_group_invite_link` gives the link for people whose privacy settings block being added.
