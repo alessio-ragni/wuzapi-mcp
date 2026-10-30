@@ -318,6 +318,8 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
         const [newest] = archive.listMessages({ chatJid: poll.chatJid, limit: 1, offset: 0 });
         try {
           if (!newest) throw new Error('the chat has no messages to start from');
+          // The phone sends messages older than the anchor, and only for an anchor it knows.
+          if (newest.id === poll.id) throw new Error('the poll is still the latest message in its chat, so the phone cannot send it back yet');
           await wuzapi.requestHistory(poll.chatJid, { id: newest.id, fromMe: newest.fromMe, timestampMs: newest.timestamp * 1000 });
           const deadline = Date.now() + 20_000;
           while (Date.now() < deadline && archive.voteCount(poll.id) === before) await new Promise((r) => setTimeout(r, 1_000));
@@ -338,7 +340,7 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
         r.unmatched.forEach((v) => voted.add(v));
         lines.push(`Voted for an option no longer known — ${r.unmatched.length}: ${r.unmatched.map(personLabel).join(', ')}`);
       }
-      if (poll.chatJid.endsWith('@g.us')) {
+      if (r.since && poll.chatJid.endsWith('@g.us')) {
         try {
           const own = archive.accountJid();
           const g = await wuzapi.groupInfo(poll.chatJid);
