@@ -6,6 +6,9 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Poll voters who are not in your address book are shown with their phone number, taken from the group's member list, instead of a privacy ID — and no longer counted as not having voted.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

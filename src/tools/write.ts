@@ -159,6 +159,14 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     },
   );
 
+  /** Group member lists pair each privacy LID with its number: worth remembering for everyone else. */
+  const learnLids = (members: GroupParticipant[]) => {
+    for (const p of members) {
+      const lid = p.LID || (p.JID.endsWith('@lid') ? p.JID : '');
+      if (lid && p.PhoneNumber && archive.resolveJid(lid) !== p.PhoneNumber) archive.recordLid(p.PhoneNumber, lid);
+    }
+  };
+
   /** A member's phone-number JID when WhatsApp gives one, filed the way the archive files people. */
   const memberJid = (p: GroupParticipant) => archive.resolveJid(p.PhoneNumber || p.JID);
   const memberName = (p: GroupParticipant) =>
@@ -190,6 +198,7 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     },
     async ({ group_jid }) => {
       const g = await wuzapi.groupInfo(group_jid);
+      learnLids(g.Participants ?? []);
       const members = (g.Participants ?? []).map((p) => {
         const jid = memberJid(p);
         const role = p.IsSuperAdmin ? ' (owner)' : p.IsAdmin ? ' (admin)' : '';
@@ -329,6 +338,14 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
         }
       }
 
+      if (poll.chatJid.endsWith('@g.us')) {
+        // Voters outside your address book arrive as privacy LIDs; the member list names their numbers.
+        try {
+          learnLids((await wuzapi.groupInfo(poll.chatJid)).Participants ?? []);
+        } catch {
+          // Without the member list, those voters keep their LID.
+        }
+      }
       const r = archive.pollResults(poll.id)!;
       const voted = new Set<string>();
       const lines = [`Poll: ${poll.question} — in ${archive.displayName(poll.chatJid) ?? poll.chatJid} {id: ${poll.id}}`];
