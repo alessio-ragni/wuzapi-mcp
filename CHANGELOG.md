@@ -6,6 +6,18 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Windows: `scripts\init-env.ps1` creates `.env` from PowerShell, the README has the Docker Desktop
+  install steps, and `send_file`, `send_voice` and `download_media` understand Windows paths
+  (`C:\Users\me\…`). A `.gitattributes` keeps the shell script usable from WSL and Git Bash.
+- CI runs both init scripts, on Linux and on Windows, and checks the `.env` they produce.
+
+### Changed
+- The folder files are sent from and the folder downloads land in are `FILES_ROOT` and
+  `DOWNLOADS_DIR` in `.env`, your home folder by default. Inside the container they are mounted at
+  `/files` and `/downloads` and the server maps paths in both directions, so Claude keeps using the
+  paths of your computer. Existing installations need no change.
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed

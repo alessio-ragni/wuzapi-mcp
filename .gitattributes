@@ -1,0 +1,5 @@
+# Keep line endings stable across platforms: Git for Windows must not turn the shell script
+# into CRLF, or bash in WSL and Git Bash refuses it. PowerShell is fine with LF.
+* text=auto
+*.sh text eol=lf
+*.ps1 text eol=lf

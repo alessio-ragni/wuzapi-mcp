@@ -16,6 +16,8 @@ sed \
   -e "s|^WUZAPI_GLOBAL_ENCRYPTION_KEY=.*|WUZAPI_GLOBAL_ENCRYPTION_KEY=$(rand 16)|" \
   -e "s|^WUZAPI_GLOBAL_HMAC_KEY=.*|WUZAPI_GLOBAL_HMAC_KEY=$(rand 32)|" \
   -e "s|^WUZAPI_USER_TOKEN=.*|WUZAPI_USER_TOKEN=$(rand 24)|" \
+  -e "s|^FILES_ROOT=.*|FILES_ROOT=$HOME|" \
+  -e "s|^DOWNLOADS_DIR=.*|DOWNLOADS_DIR=$HOME/Downloads/wuzapi-mcp|" \
   .env.example > .env
 chmod 600 .env
 

@@ -1,9 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { readFile, realpath, stat, mkdir, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { basename, extname, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { Archive } from '../archive/archive.ts';
 import type { Config } from '../config.ts';
+import { containerToHost, hostToContainer } from '../paths.ts';
 import { transcribe } from '../transcribe.ts';
 import type { GroupParticipant, ReplyTo, Wuzapi } from '../wuzapi/client.ts';
 import { UNTRUSTED, fail, formatTime, phoneOf, text } from './format.ts';
@@ -23,14 +24,20 @@ const EXT: Record<string, string> = Object.fromEntries(Object.entries(MIME).map(
 const mimeOf = (path: string) => MIME[extname(path).toLowerCase()] ?? 'application/octet-stream';
 const MAX_BYTES = 64 * 1024 * 1024;
 
-/** Reads a file Claude wants to send, refusing anything outside FILES_ROOT. */
+/**
+ * Reads a file Claude wants to send, refusing anything outside FILES_ROOT. `path` is a host path
+ * (what the user would type); it is mapped to the container mount before being opened.
+ */
 async function readAllowed(config: Config, path: string): Promise<{ data: Buffer; name: string; mimetype: string }> {
-  if (!config.FILES_ROOT) throw new Error('Sending files is off: FILES_ROOT is not set.');
-  const root = await realpath(config.FILES_ROOT);
-  const real = await realpath(resolve(path)).catch(() => {
-    throw new Error(`No file at ${path}. Give the full path on the machine running wuzapi-mcp.`);
+  if (!config.FILES_ROOT || !config.FILES_MOUNT) throw new Error('Sending files is off: FILES_ROOT is not set.');
+  const outside = new Error(`${path} is outside ${config.FILES_ROOT}, the folder files can be sent from.`);
+  const inside = hostToContainer(path, config.FILES_ROOT, config.FILES_MOUNT);
+  if (!inside) throw outside;
+  const root = await realpath(config.FILES_MOUNT);
+  const real = await realpath(inside).catch(() => {
+    throw new Error(`No file at ${path}. Give the full path on the computer running wuzapi-mcp.`);
   });
-  if (real !== root && !real.startsWith(root + sep)) throw new Error(`${path} is outside ${config.FILES_ROOT}, the folder files can be sent from.`);
+  if (real !== root && !real.startsWith(root + sep)) throw outside;
   const info = await stat(real);
   if (!info.isFile()) throw new Error(`${path} is not a file.`);
   if (info.size > MAX_BYTES) throw new Error(`${path} is larger than 64 MB.`);
@@ -80,7 +87,7 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
         'Send a file — image, video, audio or document — from this machine. Images and videos are shown inline; anything else arrives as a document.',
       inputSchema: {
         to: recipient,
-        path: z.string().describe('Absolute path of the file, e.g. /Users/me/Desktop/photo.jpg'),
+        path: z.string().describe('Absolute path of the file on this computer, e.g. /Users/me/Desktop/photo.jpg or C:\\Users\\me\\Desktop\\photo.jpg'),
         caption: z.string().optional(),
         reply_to: z.string().optional().describe('Id of the message to quote'),
         as_document: z.boolean().default(false).describe('Send images and videos as files, uncompressed'),
@@ -108,7 +115,7 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     {
       title: 'Send voice note',
       description: 'Send an audio file from this machine as a WhatsApp voice note (any format; it is converted).',
-      inputSchema: { to: recipient, path: z.string().describe('Absolute path of the audio file') },
+      inputSchema: { to: recipient, path: z.string().describe('Absolute path of the audio file on this computer') },
       annotations: write,
     },
     async ({ to, path }) => {
@@ -397,7 +404,7 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async ({ message_id, chat_jid }) => {
-      const dir = config.DOWNLOADS_DIR ?? join(config.DATA_DIR, 'downloads');
+      const dir = config.DOWNLOADS_MOUNT ?? join(config.DATA_DIR, 'downloads');
       const { message, mimetype, data } = await fetchMedia(message_id, chat_jid);
       const mime = mimetype.split(';')[0]!.trim();
       const name = message.media?.fileName
@@ -406,7 +413,8 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
       await mkdir(dir, { recursive: true });
       const path = join(dir, name.replace(/[^\w.\-]+/g, '_'));
       await writeFile(path, data);
-      return text(`Saved ${message.type} (${mime}, ${Math.round(data.length / 1024)} KB) to ${path}`);
+      const shown = config.DOWNLOADS_DIR && config.DOWNLOADS_MOUNT ? containerToHost(path, config.DOWNLOADS_MOUNT, config.DOWNLOADS_DIR) : path;
+      return text(`Saved ${message.type} (${mime}, ${Math.round(data.length / 1024)} KB) to ${shown}`);
     },
   );
 

@@ -95,7 +95,8 @@ and it may send nothing.
 | volume `mcp-data` → `archive.db` | messages (text, captions, media references), chats, contacts' names, privacy-ID pairs |
 | volume `wuzapi-data` | the WhatsApp session keys and WuzAPI's own database |
 | volume `wuzapi-files` | files WuzAPI handles while sending |
-| `~/Downloads/wuzapi-mcp` | media Claude downloaded |
+| `DOWNLOADS_DIR` (`Downloads/wuzapi-mcp` in your home folder) | media Claude downloaded; mounted at `/downloads` inside the container |
+| `FILES_ROOT` (your home folder), read-only | what `send_file` and `send_voice` may read; mounted at `/files`. Claude gives paths of your computer and `src/paths.ts` maps them to the mount, Windows paths included |
 | `.env` | secrets and settings |
 
 `docker compose down -v` deletes all three volumes.

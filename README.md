@@ -53,17 +53,28 @@ Works with **Claude Code · Claude Desktop · Gemini CLI · Codex · Cursor · V
 - 🔒 **Local-first.** No cloud service in the middle and no account to create. Your archive lives on
   your machine; your assistant only sees what it reads through a tool you allowed.
 - 🧩 **Any MCP client.** One server for every assistant you use, today and tomorrow.
-- 🐳 **Three commands to install.** A ready-made Docker image for Mac, Linux and servers: nothing to
-  compile, no Go or Python toolchain.
+- 🐳 **Three commands to install.** A ready-made Docker image for Mac, Windows, Linux and servers:
+  nothing to compile, no Go or Python toolchain.
 
 ## Get started in two minutes
 
 You need [Docker](https://docs.docker.com/get-docker/).
 
+**Mac and Linux**
+
 ```bash
 git clone https://github.com/alessio-ragni/wuzapi-mcp.git && cd wuzapi-mcp
 scripts/init-env.sh        # creates your private settings
 docker compose up -d       # starts everything
+```
+
+**Windows** (PowerShell; [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+needs WSL 2, which its installer sets up)
+
+```powershell
+git clone https://github.com/alessio-ragni/wuzapi-mcp.git; cd wuzapi-mcp
+powershell -ExecutionPolicy Bypass -File scripts\init-env.ps1   # creates your private settings
+docker compose up -d                                           # starts everything
 ```
 
 1. Open **http://127.0.0.1:8091**.
@@ -110,8 +121,8 @@ WhatsApp ⇄ WuzAPI ──signed webhooks──▶ wuzapi-mcp ── your archiv
 - **wuzapi-mcp** archives every message, shows the link status and the QR, and gives your assistant
   its tools.
 
-Both run in Docker and answer only to your own computer (`127.0.0.1`), which is why there is no
-password. Do not publish those ports on a network. One installation, one WhatsApp account.
+Both run in Docker, on Mac, Windows or Linux, and answer only to your own computer (`127.0.0.1`),
+which is why there is no password. Do not publish those ports on a network. One installation, one WhatsApp account.
 
 ## Tools
 
@@ -123,9 +134,10 @@ password. Do not publish those ports on a network. One installation, one WhatsAp
 <summary>Details</summary>
 
 - Times are shown in your time zone; dates can be given as `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
-- `send_file` and `send_voice` take the path of a file on your computer (your home folder is mounted
-  read-only for that). Any audio format works for voice notes; WuzAPI converts it.
-- `download_media` saves into `~/Downloads/wuzapi-mcp` and returns the path.
+- `send_file` and `send_voice` take the path of a file on your computer, written as you would write
+  it (`/Users/me/…` or `C:\Users\me\…`). Only files in your home folder can be sent; it is mounted
+  read-only for that. Any audio format works for voice notes; WuzAPI converts it.
+- `download_media` saves into `Downloads/wuzapi-mcp` in your home folder and returns the path.
 - `get_poll_results` lists who voted what and, in a group, who has not voted yet. Votes are kept
   from the moment they arrive; it can also ask the phone for older ones, but the phone only sends
   messages older than the chat's latest, so a poll that is still the last message cannot be fetched.
@@ -175,8 +187,8 @@ Then remove the device from your phone (WhatsApp → Settings → Linked devices
 ## FAQ
 
 **Why Docker?** WuzAPI ships as a Docker image, and Docker lets the same two commands start
-everything on a Mac, on Linux and on a server, restart it after a reboot, and keep it fenced off
-from the rest of your computer.
+everything on a Mac, on Windows, on Linux and on a server, restart it after a reboot, and keep it
+fenced off from the rest of your computer.
 
 **Why do some chats show a name but no number?** WhatsApp is moving to privacy IDs (`…@lid`) that
 hide phone numbers. wuzapi-mcp maps them back for everyone in your address book; for anyone else,

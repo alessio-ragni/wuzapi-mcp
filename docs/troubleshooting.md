@@ -13,7 +13,8 @@ docker compose logs -f wuzapi           # the WhatsApp side
 - `docker compose ps` should list `wuzapi` and `wuzapi-mcp` as *Up*. If not:
   `docker compose up -d`, then look at `docker compose logs wuzapi-mcp`.
 - `Invalid configuration` in the logs: a setting in `.env` is missing or wrong; the message names
-  it. A fresh `.env` comes from `scripts/init-env.sh` (it will not overwrite an existing one).
+  it. A fresh `.env` comes from `scripts/init-env.sh` or `scripts\init-env.ps1` (they will not
+  overwrite an existing one).
 - A different port in `.env` (`MCP_HOST_PORT`) means a different address.
 
 ## "WuzAPI is not answering"
@@ -57,8 +58,29 @@ known only by a privacy ID.
 
 ## Sending a file fails with "outside … the folder files can be sent from"
 
-Only files in your home folder can be sent. Move the file there, or see
-[configuration](configuration.md#files).
+Only files under `FILES_ROOT` — your home folder by default — can be sent. Move the file there, or
+see [configuration](configuration.md#files). Give the path as it is on your computer; on Windows
+`C:\Users\me\…` and `C:/Users/me/…` both work.
+
+## Windows
+
+- **Docker Desktop does not start, or says it needs WSL 2.** Docker Desktop runs Linux containers
+  through WSL 2. Its installer turns WSL 2 on, but it may need a reboot, and on some PCs
+  virtualisation has to be enabled in the BIOS/UEFI first. Docker's
+  [Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) has the
+  steps. `docker compose` only works once Docker Desktop shows *Engine running*.
+- **PowerShell refuses to run `init-env.ps1`** ("running scripts is disabled on this system"). That
+  is the execution policy. Run it as the README shows, with
+  `powershell -ExecutionPolicy Bypass -File scripts\init-env.ps1`, which applies to that one run
+  only.
+- **Nothing is running after a reboot.** The containers restart on their own, but only once Docker
+  Desktop is up. In Docker Desktop → Settings → General, turn on *Start Docker Desktop when you
+  sign in*.
+- **Times are in UTC.** Windows PowerShell 5.1 cannot translate the Windows time zone to the name
+  Docker needs. Set `TZ=Europe/Rome` (or yours) in `.env`, then `docker compose up -d`.
+- **`git clone` worked but `scripts/init-env.sh` fails in WSL with `\r` errors.** The repository
+  ships a `.gitattributes` that keeps the script's line endings; if your Git converted them anyway,
+  use `init-env.ps1` from PowerShell, or `git config core.autocrlf false` and clone again.
 
 ## Known WuzAPI issues
 
