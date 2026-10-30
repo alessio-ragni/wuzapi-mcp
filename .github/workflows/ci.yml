@@ -20,5 +20,51 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: Compose file is valid
-        run: cp .env.example .env && sed -i 's/=$/=0123456789abcdef0123456789abcdef/' .env && docker compose config -q
+      - name: init-env.sh writes a usable .env
+        run: |
+          scripts/init-env.sh
+          test "$(grep -c '^WUZAPI_ADMIN_TOKEN=[0-9a-f]\{48\}$' .env)" = 1
+          test "$(grep -c '^WUZAPI_GLOBAL_ENCRYPTION_KEY=[0-9a-f]\{32\}$' .env)" = 1
+          test "$(grep -c '^WUZAPI_GLOBAL_HMAC_KEY=[0-9a-f]\{64\}$' .env)" = 1
+          test "$(grep -c '^WUZAPI_USER_TOKEN=[0-9a-f]\{48\}$' .env)" = 1
+          grep -qx "FILES_ROOT=$HOME" .env
+          grep -qx "DOWNLOADS_DIR=$HOME/Downloads/wuzapi-mcp" .env
+          ! scripts/init-env.sh   # refuses to overwrite
+      - name: Compose file is valid, with a Unix and with a Windows home
+        run: |
+          docker compose config -q
+          docker compose config | grep -q -- '- type: bind'
+          docker compose config | grep -q "source: $HOME$"
+          FILES_ROOT='C:\Users\someone' DOWNLOADS_DIR='C:\Users\someone\Downloads\wuzapi-mcp' docker compose config | grep -q 'source: C:\\Users\\someone'
+
+  init-env-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: init-env.ps1 writes a usable .env (Windows PowerShell 5.1)
+        shell: cmd
+        run: powershell -ExecutionPolicy Bypass -File scripts\init-env.ps1
+      - name: The .env is what Compose expects
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes('.env')
+          if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB) { throw '.env starts with a BOM' }
+          $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          if ($text.Contains("`r")) { throw '.env has CRLF line endings' }
+          $lines = $text -split "`n"
+          foreach ($want in @('^WUZAPI_ADMIN_TOKEN=[0-9a-f]{48}$', '^WUZAPI_GLOBAL_ENCRYPTION_KEY=[0-9a-f]{32}$', '^WUZAPI_GLOBAL_HMAC_KEY=[0-9a-f]{64}$', '^WUZAPI_USER_TOKEN=[0-9a-f]{48}$')) {
+            if (@($lines | Where-Object { $_ -match $want }).Count -ne 1) { throw "missing or malformed: $want" }
+          }
+          if ($lines -notcontains "FILES_ROOT=$env:USERPROFILE") { throw 'FILES_ROOT is not the user profile' }
+          if ($lines -notcontains "DOWNLOADS_DIR=$env:USERPROFILE\Downloads\wuzapi-mcp") { throw 'DOWNLOADS_DIR is wrong' }
+          if ($lines -notcontains 'TZ=UTC') { throw 'Windows PowerShell 5.1 should leave TZ=UTC' }
+      - name: Refuses to overwrite, and PowerShell 7 fills in the time zone
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\init-env.ps1
+          if ($LASTEXITCODE -eq 0) { throw 'overwrote an existing .env' }
+          Remove-Item .env
+          pwsh -File scripts\init-env.ps1
+          $tz = (Get-Content .env | Where-Object { $_ -match '^TZ=' })
+          if ($tz -eq 'TZ=UTC' -and (Get-TimeZone).Id -ne 'UTC') { throw "time zone not translated: $tz" }
+          Write-Host "time zone line: $tz"

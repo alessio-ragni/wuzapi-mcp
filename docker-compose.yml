@@ -49,14 +49,18 @@ services:
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       WHISPER_URL: ${WHISPER_URL:-}
       TZ: ${TZ:-UTC}
-      FILES_ROOT: ${HOME}
-      DOWNLOADS_DIR: ${HOME}/Downloads/wuzapi-mcp
+      # The folder files can be sent from and the one downloads land in, as paths on this computer.
+      # Inside the container they are mounted at /files and /downloads; the server maps one to the other.
+      FILES_ROOT: ${FILES_ROOT:-${HOME}}
+      FILES_MOUNT: /files
+      DOWNLOADS_DIR: ${DOWNLOADS_DIR:-${HOME}/Downloads/wuzapi-mcp}
+      DOWNLOADS_MOUNT: /downloads
     volumes:
       - mcp-data:/data
-      # Your home folder, read-only, at the same path: send_file takes the path you would use yourself.
-      - ${HOME}:${HOME}:ro
-      # Downloaded media lands here, on your machine.
-      - ${HOME}/Downloads/wuzapi-mcp:${HOME}/Downloads/wuzapi-mcp
+      # Your home folder (or FILES_ROOT from .env), read-only: what send_file and send_voice can read.
+      - ${FILES_ROOT:-${HOME}}:/files:ro
+      # Downloaded media lands here, on your computer.
+      - ${DOWNLOADS_DIR:-${HOME}/Downloads/wuzapi-mcp}:/downloads
     ports:
       - "127.0.0.1:${MCP_HOST_PORT:-8091}:3000"
     restart: unless-stopped

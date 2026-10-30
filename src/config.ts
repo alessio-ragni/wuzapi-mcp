@@ -18,10 +18,15 @@ const schema = z.object({
   // The address you open in the browser and give to Claude Code.
   PUBLIC_URL: z.url().default('http://127.0.0.1:8091'),
   DATA_DIR: z.string().default('/data'),
-  // Files Claude may send must live under this folder (mounted read-only, same path as on the host).
+  // Files Claude may send must live under this folder on the host (e.g. /Users/me or C:\Users\me).
   FILES_ROOT: z.string().optional(),
-  // Where downloaded media is written (mounted from the host, same path), so the paths Claude gets back work there.
+  // Where that folder is mounted inside the container (/files in Docker). Defaults to FILES_ROOT:
+  // outside Docker the two are the same path.
+  FILES_MOUNT: z.string().optional(),
+  // Where downloaded media lands on the host: the path Claude reports back.
   DOWNLOADS_DIR: z.string().optional(),
+  // Where that folder is mounted inside the container (/downloads in Docker). Defaults to DOWNLOADS_DIR.
+  DOWNLOADS_MOUNT: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(['off', 'openai', 'elevenlabs', 'whisper-local']).default('off'),
   OPENAI_API_KEY: z.string().optional(),
   ELEVENLABS_API_KEY: z.string().optional(),
@@ -39,6 +44,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration:\n${problems}`);
   }
   const config = parsed.data;
+  config.FILES_MOUNT ??= config.FILES_ROOT;
+  config.DOWNLOADS_MOUNT ??= config.DOWNLOADS_DIR;
   const needsKey = {
     openai: config.OPENAI_API_KEY,
     elevenlabs: config.ELEVENLABS_API_KEY,

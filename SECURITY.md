@@ -19,8 +19,9 @@ wuzapi-mcp gives an AI assistant your WhatsApp. Read this before you connect it.
   unlink action accepts JSON only, so a plain cross-site form cannot trigger it.
 - **Signed events.** WuzAPI signs every event with HMAC-SHA256; unsigned or altered events are
   refused.
-- **Files.** Files can be sent only from your home folder, which is mounted read-only. Downloads go
-  to `~/Downloads/wuzapi-mcp`.
+- **Files.** Files can be sent only from `FILES_ROOT` — your home folder by default — which is
+  mounted read-only; the check is on the resolved path, so symlinks cannot escape it. Downloads go
+  to `DOWNLOADS_DIR`, `Downloads/wuzapi-mcp` in your home folder by default.
 - **Messages are untrusted.** Anyone who can message you can put instructions in a message. Tool
   descriptions and server instructions say so, but the real protection is you: keep Claude Code's
   confirmation on for `send_message`, `send_file`, `send_voice`, `react` and `create_poll`, and be
