@@ -5,8 +5,8 @@ import { z } from 'zod';
 import type { Archive } from '../archive/archive.ts';
 import type { Config } from '../config.ts';
 import { transcribe } from '../transcribe.ts';
-import type { ReplyTo, Wuzapi } from '../wuzapi/client.ts';
-import { UNTRUSTED, fail, phoneOf, text } from './format.ts';
+import type { GroupParticipant, ReplyTo, Wuzapi } from '../wuzapi/client.ts';
+import { UNTRUSTED, fail, formatTime, phoneOf, text } from './format.ts';
 import { toJid } from './read.ts';
 
 const MIME: Record<string, string> = {
@@ -159,6 +159,12 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     },
   );
 
+  /** A member's phone-number JID when WhatsApp gives one, filed the way the archive files people. */
+  const memberJid = (p: GroupParticipant) => archive.resolveJid(p.PhoneNumber || p.JID);
+  const memberName = (p: GroupParticipant) =>
+    p.DisplayName || archive.displayName(memberJid(p)) || archive.displayName(p.JID) || phoneOf(memberJid(p));
+  const personLabel = (jid: string) => `${archive.displayName(jid) ?? phoneOf(jid)} (${phoneOf(jid)})`;
+
   server.registerTool(
     'list_groups',
     {
@@ -185,11 +191,167 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     async ({ group_jid }) => {
       const g = await wuzapi.groupInfo(group_jid);
       const members = (g.Participants ?? []).map((p) => {
-        const jid = p.PhoneNumber || p.JID;
+        const jid = memberJid(p);
         const role = p.IsSuperAdmin ? ' (owner)' : p.IsAdmin ? ' (admin)' : '';
-        return `- ${p.DisplayName || archive.displayName(jid) || phoneOf(jid)} ${phoneOf(jid)}${role}`;
+        return `- ${memberName(p)} ${phoneOf(jid)}${role}`;
       });
-      return text([`${g.Name} (${g.JID})`, g.Topic ? `Description: ${g.Topic}` : '', `Members (${members.length}):`, ...members].filter(Boolean).join('\n'));
+      const adding = g.MemberAddMode ? `Who can add members: ${g.MemberAddMode === 'all_member_add' ? 'everyone' : 'admins only'}` : '';
+      return text(
+        [`${g.Name} (${g.JID})`, g.Topic ? `Description: ${g.Topic}` : '', adding, `Members (${members.length}):`, ...members].filter(Boolean).join('\n'),
+      );
+    },
+  );
+
+  server.registerTool(
+    'create_group',
+    {
+      title: 'Create group',
+      description:
+        'Create a WhatsApp group with you as owner, optionally making some members admins. ' +
+        'People whose privacy settings block being added are reported: send them the invite link (get_group_invite_link).',
+      inputSchema: {
+        name: z.string().min(1).max(100),
+        participants: z.array(z.string()).min(1).describe('Phone numbers with country code, or JIDs'),
+        admins: z.array(z.string()).default([]).describe('Participants to make admins'),
+        members_can_add: z.boolean().default(true).describe('Let every member add people, not only admins'),
+      },
+      annotations: write,
+    },
+    async ({ name, participants, admins, members_can_add }) => {
+      const wanted = [...new Set(participants.map((p) => phoneOf(toJid(p))))];
+      const g = await wuzapi.createGroup(name, wanted, members_can_add);
+      archive.upsertChat(g.JID, { name: g.Name || name, isGroup: true });
+      const own = archive.accountJid();
+      const byPhone = new Map((g.Participants ?? []).map((p) => [phoneOf(memberJid(p)), p]));
+      const added: string[] = [];
+      const blocked: string[] = [];
+      const failed: string[] = [];
+      for (const phone of wanted) {
+        const p = byPhone.get(phone);
+        const label = personLabel(`${phone}@s.whatsapp.net`);
+        if (p && !p.Error) added.push(phone);
+        else if (p?.Error === 403) blocked.push(label);
+        else failed.push(`${label}${p?.Error ? ` — error ${p.Error}` : ' — not in the group'}`);
+      }
+      const promote = [...new Set(admins.map((a) => phoneOf(toJid(a))))].filter((a) => added.includes(a) && `${a}@s.whatsapp.net` !== own);
+      const notPromoted = admins.map((a) => phoneOf(toJid(a))).filter((a) => !promote.includes(a));
+      if (promote.length) await wuzapi.updateParticipants(g.JID, promote, 'promote');
+      return text(
+        [
+          `Created "${g.Name || name}" (${g.JID}). ${members_can_add ? 'Every member can add people.' : 'Only admins can add people.'}`,
+          `Added (${added.length}): ${added.map((a) => personLabel(`${a}@s.whatsapp.net`)).join(', ') || 'nobody'}`,
+          promote.length ? `Admins: ${promote.map((a) => personLabel(`${a}@s.whatsapp.net`)).join(', ')}` : '',
+          notPromoted.length ? `Not made admin, because they are not in the group: ${notPromoted.join(', ')}` : '',
+          blocked.length ? `Their privacy settings need an invite instead (${blocked.length}): ${blocked.join(', ')}` : '',
+          failed.length ? `Could not add: ${failed.join('; ')}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    },
+  );
+
+  server.registerTool(
+    'update_group_participants',
+    {
+      title: 'Update group members',
+      description: 'Add or remove people in a group you administer, or make them admins (promote) or not (demote).',
+      inputSchema: {
+        group_jid: z.string().describe('Group JID, ending in @g.us'),
+        action: z.enum(['add', 'remove', 'promote', 'demote']),
+        people: z.array(z.string()).min(1).describe('Phone numbers with country code, or JIDs'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    async ({ group_jid, action, people }) => {
+      const phones = [...new Set(people.map((p) => phoneOf(toJid(p))))];
+      await wuzapi.updateParticipants(group_jid, phones, action);
+      // WuzAPI does not say who was refused, so read the group back.
+      const g = await wuzapi.groupInfo(group_jid);
+      const now = new Map((g.Participants ?? []).map((p) => [phoneOf(memberJid(p)), p]));
+      const lines = phones.map((phone) => {
+        const p = now.get(phone);
+        const state = !p ? 'not in the group' : p.IsSuperAdmin ? 'owner' : p.IsAdmin ? 'admin' : 'member';
+        return `- ${personLabel(`${phone}@s.whatsapp.net`)}: ${state}`;
+      });
+      const hint = action === 'add' && phones.some((ph) => !now.has(ph)) ? '\nWhoever is not in the group probably needs the invite link (get_group_invite_link).' : '';
+      return text(`${g.Name} after ${action}:\n${lines.join('\n')}${hint}`);
+    },
+  );
+
+  server.registerTool(
+    'get_group_invite_link',
+    {
+      title: 'Get group invite link',
+      description: 'The invite link of a group you administer. Send it with send_message to people who could not be added.',
+      inputSchema: {
+        group_jid: z.string().describe('Group JID, ending in @g.us'),
+        reset: z.boolean().default(false).describe('Revoke the current link and make a new one'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ group_jid, reset }) => text(await wuzapi.inviteLink(group_jid, reset)),
+  );
+
+  server.registerTool(
+    'get_poll_results',
+    {
+      title: 'Get poll results',
+      description:
+        'Who voted what on a poll, with names and numbers, and — in a group — who has not voted yet. ' +
+        'Give the poll message id, or a chat to use its latest poll. Votes are kept from the moment they arrive; ' +
+        'with refresh, older votes are asked from the phone first.',
+      inputSchema: {
+        message_id: z.string().optional().describe('Id of the poll message'),
+        chat_jid: z.string().optional().describe('Chat or group whose latest poll to read'),
+        refresh: z.boolean().default(true).describe('Ask the phone for the votes first (takes up to ~20 seconds)'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ message_id, chat_jid, refresh }) => {
+      const poll = message_id ? archive.getPoll(message_id) : chat_jid ? archive.latestPoll(toJid(chat_jid)) : null;
+      if (!poll) return fail(message_id ? `No poll ${message_id} in the archive.` : 'Give message_id or chat_jid; no poll found.');
+
+      let refreshNote = '';
+      if (refresh) {
+        const before = archive.voteCount(poll.id);
+        const [newest] = archive.listMessages({ chatJid: poll.chatJid, limit: 1, offset: 0 });
+        try {
+          if (!newest) throw new Error('the chat has no messages to start from');
+          await wuzapi.requestHistory(poll.chatJid, { id: newest.id, fromMe: newest.fromMe, timestampMs: newest.timestamp * 1000 });
+          const deadline = Date.now() + 20_000;
+          while (Date.now() < deadline && archive.voteCount(poll.id) === before) await new Promise((r) => setTimeout(r, 1_000));
+          if (archive.voteCount(poll.id) === before) refreshNote = 'The phone sent no new votes.';
+        } catch (err) {
+          refreshNote = `Could not ask the phone for votes: ${(err as Error).message}`;
+        }
+      }
+
+      const r = archive.pollResults(poll.id)!;
+      const voted = new Set<string>();
+      const lines = [`Poll: ${poll.question} — in ${archive.displayName(poll.chatJid) ?? poll.chatJid} {id: ${poll.id}}`];
+      for (const o of r.options) {
+        o.voters.forEach((v) => voted.add(v));
+        lines.push(`${o.option} — ${o.voters.length}${o.voters.length ? `: ${o.voters.map(personLabel).join(', ')}` : ''}`);
+      }
+      if (r.unmatched.length) {
+        r.unmatched.forEach((v) => voted.add(v));
+        lines.push(`Voted for an option no longer known — ${r.unmatched.length}: ${r.unmatched.map(personLabel).join(', ')}`);
+      }
+      if (poll.chatJid.endsWith('@g.us')) {
+        try {
+          const own = archive.accountJid();
+          const g = await wuzapi.groupInfo(poll.chatJid);
+          const missing = (g.Participants ?? []).filter((p) => !voted.has(memberJid(p)) && memberJid(p) !== own);
+          lines.push(`Not voted — ${missing.length}: ${missing.map((p) => `${memberName(p)} (${phoneOf(memberJid(p))})`).join(', ') || 'nobody'}`);
+        } catch {
+          // The group is optional context; the votes stand on their own.
+        }
+      }
+      lines.push(r.since ? `Votes on file since ${formatTime(r.since)}.` : 'No votes on file for this poll.');
+      if (refreshNote) lines.push(refreshNote);
+      if (!r.since) lines.push('Votes cast before wuzapi-mcp kept them can be seen on the phone: open the poll → View votes.');
+      return text(lines.join('\n'));
     },
   );
 

@@ -1,4 +1,4 @@
-import type { ArchivedMessage, MediaRef, MessageType } from '../archive/archive.ts';
+import type { ArchivedMessage, MediaRef, MessageType, Poll, PollVote } from '../archive/archive.ts';
 
 /**
  * Turns WhatsApp messages, as WuzAPI forwards them, into archive rows.
@@ -117,14 +117,67 @@ export function readContent(message: Obj): Content | null {
   const contacts = obj(m.contactsArrayMessage);
   if (contacts) return { type: 'contact', text: str(contacts.displayName) ?? null, quotedId: null, media: null };
 
-  const poll = obj(m.pollCreationMessage) ?? obj(m.pollCreationMessageV2) ?? obj(m.pollCreationMessageV3);
+  const poll = readPoll(m);
   if (poll) {
-    const options = Array.isArray(poll.options) ? poll.options.map((o) => str(obj(o)?.optionName)).filter(Boolean) : [];
-    return { type: 'poll', text: `${str(poll.name) ?? ''}${options.length ? ` — ${options.join(' / ')}` : ''}`, quotedId: null, media: null };
+    const { question, options } = poll;
+    return { type: 'poll', text: `${question}${options.length ? ` — ${options.join(' / ')}` : ''}`, quotedId: null, media: null };
   }
 
   // Reactions, receipts, protocol messages (deletes, key shares…), poll votes: not archived.
   return null;
+}
+
+/** Question and options of a poll message, or null when the message is not a poll. */
+export function readPoll(message: Obj): { question: string; options: string[] } | null {
+  const m = unwrap(message);
+  const poll = obj(m.pollCreationMessage) ?? obj(m.pollCreationMessageV2) ?? obj(m.pollCreationMessageV3);
+  if (!poll) return null;
+  const options = Array.isArray(poll.options) ? poll.options.map((o) => str(obj(o)?.optionName)).filter((o): o is string => !!o) : [];
+  return { question: str(poll.name) ?? '', options };
+}
+
+/**
+ * A live poll vote. WuzAPI decrypts it and puts the result next to the event, in `pollVote`:
+ * the chosen options arrive as SHA-256 hashes of their text, base64.
+ */
+export function voteFromEvent(payload: Obj): PollVote | null {
+  const vote = obj(payload.pollVote);
+  const event = obj(payload.event) ?? {};
+  const info = obj(event.Info) ?? {};
+  const pollId = str(vote?.pollCreationMsgID);
+  if (!vote || !pollId) return null;
+  const fromMe = info.IsFromMe === true;
+  const sender = str(info.Sender);
+  if (!fromMe && !sender) return null;
+  const hashes = Array.isArray(vote.selectedHashesB64) ? vote.selectedHashesB64.filter((h): h is string => typeof h === 'string') : [];
+  const ts = str(info.Timestamp) ? Math.floor(Date.parse(str(info.Timestamp)!) / 1000) : NaN;
+  return {
+    pollId,
+    voterJid: fromMe ? 'me' : preferPn(sender!, str(info.SenderAlt)),
+    hashes,
+    timestamp: Number.isFinite(ts) && ts > 0 ? ts : Math.floor(Date.now() / 1000),
+  };
+}
+
+/** The votes the phone attaches to a poll in a history sync (`WebMessageInfo.pollUpdates`). */
+function votesFromWeb(web: Obj, pollId: string, isGroup: boolean, chatJid: string): PollVote[] {
+  const updates = Array.isArray(web.pollUpdates) ? web.pollUpdates : [];
+  const votes: PollVote[] = [];
+  for (const u of updates) {
+    const update = obj(u);
+    const key = obj(update?.pollUpdateMessageKey) ?? {};
+    const selected = obj(update?.vote)?.selectedOptions;
+    const voter = key.fromMe === true ? 'me' : str(key.participant) ?? (isGroup ? undefined : chatJid);
+    if (!voter) continue;
+    const ms = num(update?.senderTimestampMS) ?? num(update?.senderTimestampMs);
+    votes.push({
+      pollId,
+      voterJid: voter === 'me' ? 'me' : bareJid(voter),
+      hashes: Array.isArray(selected) ? selected.filter((h): h is string => typeof h === 'string') : [],
+      timestamp: ms ? Math.floor(ms / 1000) : (num(web.messageTimestamp) ?? 0),
+    });
+  }
+  return votes;
 }
 
 /** A live message, or a row of WuzAPI's stored history: `{ Info, Message }`. */
@@ -188,13 +241,15 @@ export function fromWebMessage(web: Obj, conversationJid?: string): ArchivedMess
 
 export interface HistoryBatch {
   messages: ArchivedMessage[];
+  polls: Poll[];
+  votes: PollVote[];
   chats: { jid: string; name: string | null }[];
   pushNames: { jid: string; name: string }[];
 }
 
 /** Everything useful in a HistorySync event's `Data`. */
 export function fromHistorySync(data: Obj): HistoryBatch {
-  const batch: HistoryBatch = { messages: [], chats: [], pushNames: [] };
+  const batch: HistoryBatch = { messages: [], polls: [], votes: [], chats: [], pushNames: [] };
   const conversations = Array.isArray(data.conversations) ? data.conversations : [];
   for (const c of conversations) {
     if (!isObj(c)) continue;
@@ -209,7 +264,13 @@ export function fromHistorySync(data: Obj): HistoryBatch {
       const web = obj(obj(entry)?.message);
       if (!web) continue;
       const m = fromWebMessage(web, jid);
-      if (m) batch.messages.push(m);
+      if (!m) continue;
+      batch.messages.push(m);
+      const poll = m.type === 'poll' ? readPoll(obj(web.message)!) : null;
+      if (poll) {
+        batch.polls.push({ id: m.id, chatJid: m.chatJid, ...poll });
+        batch.votes.push(...votesFromWeb(web, m.id, m.chatJid.endsWith('@g.us'), m.chatJid));
+      }
     }
   }
   const pushnames = Array.isArray(data.pushnames) ? data.pushnames : [];

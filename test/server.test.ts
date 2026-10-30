@@ -46,6 +46,21 @@ const fakeWuzapi = {
   async conversations() {
     return { chats: [], has_more: false };
   },
+  async createGroup(name: string, participants: string[], membersCanAdd: boolean) {
+    sent.push({ createGroup: name, participants, membersCanAdd });
+    return {
+      JID: '120363000000000099@g.us',
+      Name: name,
+      Participants: [
+        { JID: '900000000000001@lid', PhoneNumber: ME, IsAdmin: true, IsSuperAdmin: true },
+        { JID: '900000000000002@lid', PhoneNumber: ALICE, IsAdmin: false, IsSuperAdmin: false },
+        { JID: '15550000003@s.whatsapp.net', IsAdmin: false, IsSuperAdmin: false, Error: 403 },
+      ],
+    };
+  },
+  async updateParticipants(group: string, people: string[], action: string) {
+    sent.push({ group, people, action });
+  },
   async sendText(to: string, body: string, reply?: unknown) {
     sent.push({ to, body, reply });
     return { Id: 'SENT-1', Timestamp: 0 };
@@ -126,5 +141,21 @@ test('MCP tools over HTTP: list, search, reply', async () => {
 
   const off = await client.callTool({ name: 'transcribe_voice', arguments: { message_id: 'W1' } });
   assert.equal(off.isError, true);
+  await client.close();
+});
+
+test('create_group adds who it can, promotes admins and reports who needs an invite', async () => {
+  const client = new Client({ name: 'test', version: '0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  const r = await client.callTool({
+    name: 'create_group',
+    arguments: { name: 'Picnic', participants: ['+1 555 000 0002', '15550000003'], admins: ['15550000002'] },
+  });
+  const out = (r as { content: { text: string }[] }).content[0]!.text;
+  assert.deepEqual(sent.at(-2), { createGroup: 'Picnic', participants: ['15550000002', '15550000003'], membersCanAdd: true });
+  assert.deepEqual(sent.at(-1), { group: '120363000000000099@g.us', people: ['15550000002'], action: 'promote' });
+  assert.match(out, /Added \(1\)/);
+  assert.match(out, /need an invite instead \(1\): .*15550000003/);
+  assert.equal(archive.getChat('120363000000000099@g.us')?.name, 'Picnic');
   await client.close();
 });

@@ -52,9 +52,12 @@ export interface ContactInfo {
 export interface GroupParticipant {
   JID: string;
   PhoneNumber?: string;
+  LID?: string;
   IsAdmin: boolean;
   IsSuperAdmin: boolean;
   DisplayName?: string;
+  /** Set when creating a group could not add this person: 403 means their privacy settings need an invite. */
+  Error?: number;
 }
 
 export interface GroupInfo {
@@ -65,6 +68,7 @@ export interface GroupInfo {
   GroupCreated?: string;
   Participants?: GroupParticipant[];
   ParticipantCount?: number;
+  MemberAddMode?: string;
 }
 
 export interface SendResult {
@@ -211,6 +215,42 @@ export class Wuzapi {
 
   groupInfo(groupJid: string): Promise<GroupInfo> {
     return this.call('GET', `/group/info?groupJID=${encodeURIComponent(groupJid)}`);
+  }
+
+  /** Creates a group with you as its owner. People who could not be added carry an `Error` in the result. */
+  createGroup(name: string, participants: string[], membersCanAdd: boolean): Promise<GroupInfo> {
+    return this.call('POST', '/group/create', {
+      body: { name, participants, memberaddmode: membersCanAdd ? 'all_member_add' : 'admin_add' },
+      timeoutMs: 60_000,
+    });
+  }
+
+  updateParticipants(groupJid: string, people: string[], action: 'add' | 'remove' | 'promote' | 'demote'): Promise<unknown> {
+    return this.call('POST', '/group/updateparticipants', { body: { GroupJID: groupJid, Phone: people, Action: action } });
+  }
+
+  async inviteLink(groupJid: string, reset = false): Promise<string> {
+    const data = await this.call<{ InviteLink: string }>('GET', `/group/invitelink?groupJID=${encodeURIComponent(groupJid)}&reset=${reset}`);
+    return data.InviteLink;
+  }
+
+  setMemberAddMode(groupJid: string, membersCanAdd: boolean): Promise<unknown> {
+    return this.call('POST', '/group/memberaddmode', { body: { groupjid: groupJid, mode: membersCanAdd ? 'all_member_add' : 'admin_add' } });
+  }
+
+  /**
+   * Asks the phone for up to `count` messages of one chat older than the anchor message.
+   * The answer arrives later, as a HistorySync webhook.
+   */
+  requestHistory(chatJid: string, anchor: { id: string; fromMe: boolean; timestampMs: number }, count = 50): Promise<unknown> {
+    const q = new URLSearchParams({
+      chat_jid: chatJid,
+      oldest_msg_id: anchor.id,
+      oldest_msg_from_me: String(anchor.fromMe),
+      oldest_msg_timestamp: String(anchor.timestampMs),
+      count: String(count),
+    });
+    return this.call('GET', `/session/history?${q}`);
   }
 
   // --- sending ---------------------------------------------------------------

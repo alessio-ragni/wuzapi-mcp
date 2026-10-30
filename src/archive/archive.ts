@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -39,6 +40,30 @@ export interface ArchivedMessage {
   text: string | null;
   quotedId: string | null;
   media: MediaRef | null;
+}
+
+export interface Poll {
+  id: string;
+  chatJid: string;
+  question: string;
+  options: string[];
+}
+
+/** One person's current choice on a poll. Options are SHA-256 hashes of their text, base64; none means withdrawn. */
+export interface PollVote {
+  pollId: string;
+  voterJid: string;
+  hashes: string[];
+  timestamp: number;
+}
+
+export interface PollResults {
+  poll: Poll;
+  options: { option: string; voters: string[] }[];
+  /** Voters whose choice matches no known option (the poll was edited, or its text is unknown). */
+  unmatched: string[];
+  /** When the earliest vote on file was recorded, or null when none is. */
+  since: number | null;
 }
 
 export interface Chat {
@@ -111,6 +136,20 @@ CREATE TABLE IF NOT EXISTS pn_lid (
   checked_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pn_lid_lid ON pn_lid (lid);
+CREATE TABLE IF NOT EXISTS polls (
+  id       TEXT PRIMARY KEY,
+  chat_jid TEXT NOT NULL,
+  question TEXT NOT NULL,
+  options  TEXT NOT NULL
+);
+-- The latest vote of each person on each poll; hashes is a JSON array, empty when withdrawn.
+CREATE TABLE IF NOT EXISTS poll_votes (
+  poll_id   TEXT NOT NULL,
+  voter_jid TEXT NOT NULL,
+  hashes    TEXT NOT NULL,
+  ts        INTEGER NOT NULL,
+  PRIMARY KEY (poll_id, voter_jid)
+);
 CREATE INDEX IF NOT EXISTS messages_chat_time ON messages (chat_jid, timestamp);
 CREATE INDEX IF NOT EXISTS messages_time ON messages (timestamp);
 CREATE INDEX IF NOT EXISTS messages_id ON messages (id);
@@ -214,6 +253,8 @@ export class Archive {
       DELETE FROM contacts;
       DELETE FROM meta;
       DELETE FROM pn_lid;
+      DELETE FROM polls;
+      DELETE FROM poll_votes;
       INSERT INTO messages_fts (messages_fts) VALUES ('rebuild');
     `);
     this.db.exec('VACUUM');
@@ -274,6 +315,9 @@ export class Archive {
       )
       .run(p);
     this.db.prepare('DELETE FROM contacts WHERE jid = @from').run(p);
+    this.db.prepare('UPDATE OR IGNORE poll_votes SET voter_jid = @to WHERE voter_jid = @from').run(p);
+    this.db.prepare('DELETE FROM poll_votes WHERE voter_jid = @from').run(p);
+    this.db.prepare('UPDATE polls SET chat_jid = @to WHERE chat_jid = @from').run(p);
   }
 
   /** Files a message under phone numbers wherever the LID is known. */
@@ -337,6 +381,76 @@ export class Archive {
       for (const m of messages) if (this.addMessage(m)) added++;
     })();
     return added;
+  }
+
+  // --- polls -----------------------------------------------------------------
+
+  recordPoll(p: Poll): void {
+    this.db
+      .prepare('INSERT INTO polls (id, chat_jid, question, options) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING')
+      .run(p.id, p.chatJid, p.question, JSON.stringify(p.options));
+  }
+
+  /** Keeps each person's latest vote; an older one arriving late (history after live) changes nothing. */
+  recordVote(v: PollVote): boolean {
+    const voter = this.resolveJid(v.voterJid === 'me' ? (this.accountJid() ?? 'me') : v.voterJid);
+    const r = this.db
+      .prepare(
+        `INSERT INTO poll_votes (poll_id, voter_jid, hashes, ts) VALUES (?, ?, ?, ?)
+         ON CONFLICT (poll_id, voter_jid) DO UPDATE SET hashes = excluded.hashes, ts = excluded.ts WHERE excluded.ts >= poll_votes.ts`,
+      )
+      .run(v.pollId, voter, JSON.stringify(v.hashes), v.timestamp);
+    return r.changes > 0;
+  }
+
+  getPoll(id: string): Poll | null {
+    const row = this.db.prepare('SELECT * FROM polls WHERE id = ?').get(id) as
+      | { id: string; chat_jid: string; question: string; options: string }
+      | undefined;
+    if (row) return { id: row.id, chatJid: row.chat_jid, question: row.question, options: JSON.parse(row.options) as string[] };
+    // Polls archived before polls had their own table: the text reads "question — A / B".
+    const m = this.getMessage(id);
+    if (!m || m.type !== 'poll' || !m.text) return null;
+    const [question, options = ''] = m.text.split(' — ');
+    return { id, chatJid: m.chatJid, question: question!, options: options ? options.split(' / ') : [] };
+  }
+
+  /** The most recent poll in a chat. */
+  latestPoll(chatJid: string): Poll | null {
+    const row = this.db
+      .prepare(`SELECT id FROM messages WHERE chat_jid = ? AND type = 'poll' ORDER BY timestamp DESC LIMIT 1`)
+      .get(chatJid) as { id: string } | undefined;
+    return row ? this.getPoll(row.id) : null;
+  }
+
+  voteCount(pollId: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM poll_votes WHERE poll_id = ?').get(pollId) as { n: number }).n;
+  }
+
+  pollResults(pollId: string): PollResults | null {
+    const poll = this.getPoll(pollId);
+    if (!poll) return null;
+    const byHash = new Map(poll.options.map((o) => [createHash('sha256').update(o).digest('base64'), o]));
+    const options = poll.options.map((option) => ({ option, voters: [] as string[] }));
+    const unmatched: string[] = [];
+    const rows = this.db.prepare('SELECT voter_jid, hashes, ts FROM poll_votes WHERE poll_id = ? ORDER BY ts').all(pollId) as {
+      voter_jid: string;
+      hashes: string;
+      ts: number;
+    }[];
+    for (const r of rows) {
+      const hashes = JSON.parse(r.hashes) as string[];
+      if (!hashes.length) continue;
+      let matched = false;
+      for (const h of hashes) {
+        const option = byHash.get(h);
+        if (option === undefined) continue;
+        options.find((o) => o.option === option)!.voters.push(r.voter_jid);
+        matched = true;
+      }
+      if (!matched) unmatched.push(r.voter_jid);
+    }
+    return { poll, options, unmatched, since: rows.length ? rows[0]!.ts : null };
   }
 
   // --- reading -------------------------------------------------------------
