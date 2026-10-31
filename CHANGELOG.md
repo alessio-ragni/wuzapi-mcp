@@ -6,6 +6,8 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 - Windows: `scripts\init-env.ps1` creates `.env` from PowerShell, the README has the Docker Desktop
   install steps, and `send_file`, `send_voice` and `download_media` understand Windows paths
