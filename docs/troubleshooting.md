@@ -82,6 +82,24 @@ see [configuration](configuration.md#files). Give the path as it is on your comp
   ships a `.gitattributes` that keeps the script's line endings; if your Git converted them anyway,
   use `init-env.ps1` from PowerShell, or `git config core.autocrlf false` and clone again.
 
+## Hosted mode
+
+- **claude.ai says "Couldn't reach the MCP server".** From any computer, `curl -sI https://your.host/mcp`
+  must answer `401` with a `WWW-Authenticate` header, and
+  `curl -s https://your.host/.well-known/oauth-protected-resource/mcp` must return JSON. If the
+  name does not resolve, fix the DNS record; if the connection fails, ports 80 and 443 are not open
+  or Caddy is not up (`docker compose logs caddy`); a certificate error means Caddy could not reach
+  Let's Encrypt yet — wait a minute and look at the same logs.
+- **"Authorization with the MCP server failed".** The passphrase page did not complete: a wrong
+  passphrase, or the address is blocked after five wrong ones (wait fifteen minutes). Check the
+  clock on the server too: `date` must be right, or tokens expire at once.
+- **The page keeps asking to sign in.** The cookie lasts 30 days and is only sent over https: open
+  the `https://` address, not `http://`. Clearing `auth.db` or changing the volume signs you out.
+- **`docker compose up` complains about `PUBLIC_HOST`.** `COMPOSE_FILE` includes the hosted file,
+  which needs `PUBLIC_HOST` in `.env`; set it to the host name in `PUBLIC_URL`.
+- **`Invalid configuration` mentions `OWNER_PASSPHRASE` or `https`.** A `PUBLIC_URL` that is not
+  this computer needs both: that is on purpose.
+
 ## Known WuzAPI issues
 
 wuzapi-mcp works around these in WuzAPI 1.1.0; they are reported upstream.

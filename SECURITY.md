@@ -10,13 +10,21 @@ include real messages, phone numbers or session files in a report.
 
 wuzapi-mcp gives an AI assistant your WhatsApp. Read this before you connect it.
 
-- **Local only.** The page, the MCP endpoint and WuzAPI's API are published on `127.0.0.1`. There is
-  no password because nothing outside your computer can reach them. Publishing those ports on a
-  network, or putting them behind a tunnel, gives whoever reaches them your WhatsApp. A login for
-  running on a server is planned and is not in 0.x.
-- **Host checks.** Requests whose `Host` header is not `127.0.0.1`, `localhost` or `wuzapi-mcp` are
-  refused, so a web page open in your browser cannot reach the server through DNS rebinding. The
-  unlink action accepts JSON only, so a plain cross-site form cannot trigger it.
+- **Local only, by default.** The page, the MCP endpoint and WuzAPI's API are published on
+  `127.0.0.1`. There is no password because nothing outside your computer can reach them.
+  Publishing those ports on a network, or putting them behind a tunnel, gives whoever reaches them
+  your WhatsApp. The server refuses to start with a public `PUBLIC_URL` and no passphrase.
+- **Hosted mode** ([docs/hosted.md](docs/hosted.md)) is the supported way to put it on the
+  internet: only Caddy is published, with HTTPS; the page and the API need the owner's passphrase
+  (constant-time check, five failures per address then a 15-minute block, HttpOnly SameSite cookie);
+  the MCP endpoint needs an OAuth 2.1 bearer token that only the owner's approval can produce
+  (PKCE, single-use codes, hashed tokens, one-hour access tokens, rotating refresh tokens,
+  revocation). Changing the passphrase and clearing `auth.db` signs every assistant out.
+- **Host and origin checks.** Requests whose `Host` header is not `127.0.0.1`, `localhost`,
+  `wuzapi-mcp` or the host of `PUBLIC_URL` are refused, so a web page open in your browser cannot
+  reach the server through DNS rebinding. The unlink action accepts JSON only, and in hosted mode
+  every form post and the unlink must come from the server's own origin, so a cross-site page
+  cannot trigger them.
 - **Signed events.** WuzAPI signs every event with HMAC-SHA256; unsigned or altered events are
   refused.
 - **Files.** Files can be sent only from `FILES_ROOT` — your home folder by default — which is

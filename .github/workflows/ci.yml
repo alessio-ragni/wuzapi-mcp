@@ -36,6 +36,12 @@ jobs:
           docker compose config | grep -q -- '- type: bind'
           docker compose config | grep -q "source: $HOME$"
           FILES_ROOT='C:\Users\someone' DOWNLOADS_DIR='C:\Users\someone\Downloads\wuzapi-mcp' docker compose config | grep -q 'source: C:\\Users\\someone'
+      - name: Hosted compose file is valid and publishes Caddy only
+        run: |
+          out=$(PUBLIC_URL=https://wa.example.com PUBLIC_HOST=wa.example.com OWNER_PASSPHRASE=an-invented-passphrase docker compose -f docker-compose.yml -f docker-compose.hosted.yml config)
+          echo "$out" | grep -q 'image: caddy'
+          echo "$out" | grep -q 'PUBLIC_HOST: wa.example.com'
+          test "$(echo "$out" | grep -c 'published:')" = 3
 
   init-env-windows:
     runs-on: windows-latest

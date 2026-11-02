@@ -11,12 +11,18 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
   // Host headers the server answers to. Anything else gets a 403 (DNS rebinding protection).
+  // The host of PUBLIC_URL is always added.
   ALLOWED_HOSTS: z
     .string()
     .default('127.0.0.1,localhost,wuzapi-mcp')
     .transform((s) => s.split(',').map((h) => h.trim()).filter(Boolean)),
-  // The address you open in the browser and give to Claude Code.
+  // The address you open in the browser and give to your assistant. On a server: https://your.host.
   PUBLIC_URL: z.url().default('http://127.0.0.1:8091'),
+  // Hosted mode: the passphrase that signs the owner in, on the page and when an assistant connects.
+  // Required as soon as PUBLIC_URL is not this computer; unset locally, where nothing else can reach the server.
+  OWNER_PASSPHRASE: z.string().min(12, 'at least 12 characters').optional(),
+  // The host name Caddy serves (docker-compose.hosted.yml). Must agree with PUBLIC_URL when both are set.
+  PUBLIC_HOST: z.string().optional(),
   DATA_DIR: z.string().default('/data'),
   // Files Claude may send must live under this folder on the host (e.g. /Users/me or C:\Users\me).
   FILES_ROOT: z.string().optional(),
@@ -33,7 +39,12 @@ const schema = z.object({
   WHISPER_URL: z.url().optional(),
 });
 
-export type Config = z.infer<typeof schema>;
+export type Config = z.infer<typeof schema> & {
+  /** True when OWNER_PASSPHRASE is set: the page, the API and the MCP endpoint require a login. */
+  hosted: boolean;
+};
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // Compose passes unset variables as empty strings: treat them as absent.
@@ -43,9 +54,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     const problems = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid configuration:\n${problems}`);
   }
-  const config = parsed.data;
+  const config: Config = { ...parsed.data, hosted: parsed.data.OWNER_PASSPHRASE !== undefined };
   config.FILES_MOUNT ??= config.FILES_ROOT;
   config.DOWNLOADS_MOUNT ??= config.DOWNLOADS_DIR;
+  config.PUBLIC_URL = config.PUBLIC_URL.replace(/\/+$/, '');
+
+  const publicUrl = new URL(config.PUBLIC_URL);
+  if (!LOOPBACK.has(publicUrl.hostname)) {
+    if (!config.hosted) {
+      throw new Error(`PUBLIC_URL=${config.PUBLIC_URL} is not this computer: set OWNER_PASSPHRASE in .env so that only you can get in.`);
+    }
+    if (publicUrl.protocol !== 'https:') {
+      throw new Error(`PUBLIC_URL=${config.PUBLIC_URL} must use https when the server is reachable from outside this computer.`);
+    }
+  }
+  if (config.PUBLIC_HOST && config.PUBLIC_HOST.toLowerCase() !== publicUrl.hostname) {
+    throw new Error(`PUBLIC_HOST=${config.PUBLIC_HOST} does not match PUBLIC_URL=${config.PUBLIC_URL}: they must name the same host.`);
+  }
+  if (!config.ALLOWED_HOSTS.includes(publicUrl.hostname)) config.ALLOWED_HOSTS.push(publicUrl.hostname);
+
   const needsKey = {
     openai: config.OPENAI_API_KEY,
     elevenlabs: config.ELEVENLABS_API_KEY,

@@ -23,7 +23,8 @@
   answers MCP requests. Source in `src/`.
 
 Both ports are published on `127.0.0.1` only. Inside Docker the two services talk over their own
-network.
+network. In [hosted mode](hosted.md) neither port is published: a Caddy container terminates HTTPS
+and forwards to `wuzapi-mcp:3000`, and the server asks for a login (below).
 
 ## How a message travels
 
@@ -93,6 +94,8 @@ and it may send nothing.
 | Where | What |
 |---|---|
 | volume `mcp-data` → `archive.db` | messages (text, captions, media references), chats, contacts' names, privacy-ID pairs |
+| volume `mcp-data` → `auth.db` (hosted mode) | OAuth clients, hashed codes, tokens and browser sessions |
+| volumes `caddy-data`, `caddy-config` (hosted mode) | the HTTPS certificate and Caddy's state |
 | volume `wuzapi-data` | the WhatsApp session keys and WuzAPI's own database |
 | volume `wuzapi-files` | files WuzAPI handles while sending |
 | `DOWNLOADS_DIR` (`Downloads/wuzapi-mcp` in your home folder) | media Claude downloaded; mounted at `/downloads` inside the container |
@@ -108,6 +111,32 @@ over the same archive. Tool definitions are in `src/tools/`; every description t
 text says that the text is untrusted. The server's instructions tell the client to confirm before
 sending anything the user did not ask for.
 
-There is no authentication in this version: the endpoint is reachable from your computer only, and
-every request's `Host` header must be `127.0.0.1`, `localhost` or `wuzapi-mcp`, which stops web
-pages in your browser from reaching it through DNS rebinding.
+Locally there is no authentication: the endpoint is reachable from your computer only, and every
+request's `Host` header must be `127.0.0.1`, `localhost`, `wuzapi-mcp` or the host of `PUBLIC_URL`,
+which stops web pages in your browser from reaching it through DNS rebinding.
+
+## Hosted mode: the login
+
+With `OWNER_PASSPHRASE` set (`src/config.ts` → `config.hosted`), `src/http/server.ts` mounts the
+owner login and an OAuth 2.1 authorization server, both in `src/http/auth/`:
+
+- `store.ts` — `auth.db`, a second SQLite file in the data volume: registered clients, authorization
+  codes, access and refresh tokens, browser sessions. Codes, tokens and session ids are random
+  32-byte values stored as SHA-256 hashes; expired rows are pruned hourly. Unlinking WhatsApp wipes
+  `archive.db`, never `auth.db`.
+- `owner.ts` — the passphrase check (constant time, five failures per address then 15 minutes of
+  429), the `wuzapi_owner` cookie (HttpOnly, Secure on https, SameSite=Lax, 30 days) and the
+  same-origin check on every form post.
+- `provider.ts` — the SDK's `OAuthServerProvider`: dynamic client registration (https redirects, or
+  http on localhost for native clients), the consent page, single-use codes (10 minutes), access
+  tokens (1 hour) paired with refresh tokens (90 days) that rotate on every refresh, revocation.
+- The SDK's `mcpAuthRouter` serves `/.well-known/oauth-protected-resource/mcp`,
+  `/.well-known/oauth-authorization-server`, `/authorize`, `/token`, `/register` and `/revoke`, and
+  `requireBearerAuth` guards `/mcp`: no token means `401` with the `resource_metadata` pointer the
+  clients discover the login from. PKCE (S256) is verified by the SDK.
+
+The flow an assistant goes through: `401` on `/mcp` → reads the two metadata documents → registers
+itself → sends the owner to `/authorize` → the owner types the passphrase on the consent page (or
+just clicks *Allow* with a live cookie) → `/oauth/approve` issues a code and redirects back → the
+assistant swaps the code for tokens at `/token` → calls `/mcp` with the bearer token, refreshing
+before it expires.
