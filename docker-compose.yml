@@ -43,7 +43,11 @@ services:
       WUZAPI_GLOBAL_HMAC_KEY: ${WUZAPI_GLOBAL_HMAC_KEY}
       WUZAPI_HISTORY_PER_CHAT: ${WUZAPI_HISTORY_PER_CHAT:-0}
       WUZAPI_SYNC_DAYS: ${WUZAPI_SYNC_DAYS:-365}
-      PUBLIC_URL: http://127.0.0.1:${MCP_HOST_PORT:-8091}
+      # On this computer: the local page. On a server: PUBLIC_URL from .env (https://your.host), with
+      # OWNER_PASSPHRASE and PUBLIC_HOST — see docs/hosted.md and docker-compose.hosted.yml.
+      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:${MCP_HOST_PORT:-8091}}
+      OWNER_PASSPHRASE: ${OWNER_PASSPHRASE:-}
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-off}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}

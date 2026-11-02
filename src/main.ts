@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { Archive } from './archive/archive.ts';
 import { loadConfig } from './config.ts';
+import { AuthStore } from './http/auth/store.ts';
 import { buildApp, VERSION } from './http/server.ts';
 import { Session } from './session.ts';
 import { Wuzapi } from './wuzapi/client.ts';
@@ -9,12 +10,13 @@ const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...arg
 
 const config = loadConfig();
 const archive = new Archive(join(config.DATA_DIR, 'archive.db'));
+const auth = config.hosted ? new AuthStore(join(config.DATA_DIR, 'auth.db')) : undefined;
 const wuzapi = new Wuzapi(config.WUZAPI_URL, config.WUZAPI_USER_TOKEN, config.WUZAPI_ADMIN_TOKEN);
 const session = new Session(config, wuzapi, archive);
 
-const app = buildApp({ config, archive, wuzapi, session });
+const app = buildApp({ config, archive, wuzapi, session, auth });
 const server = app.listen(config.PORT, config.HOST, () => {
-  log(`wuzapi-mcp ${VERSION} listening on ${config.HOST}:${config.PORT} — open ${config.PUBLIC_URL}`);
+  log(`wuzapi-mcp ${VERSION} listening on ${config.HOST}:${config.PORT} — open ${config.PUBLIC_URL}${config.hosted ? ' (hosted: sign-in required)' : ''}`);
 });
 
 // Bring WuzAPI into shape as soon as it answers: user, events, connection, archive import.
@@ -33,11 +35,16 @@ const names = setInterval(() => {
   });
 }, 30 * 60_000);
 
+// Expired codes, tokens and sessions go once an hour.
+const pruner = setInterval(() => auth?.prune(), 60 * 60_000);
+
 function shutdown(): void {
   clearInterval(checker);
   clearInterval(names);
+  clearInterval(pruner);
   server.close(() => {
     archive.close();
+    auth?.close();
     process.exit(0);
   });
   setTimeout(() => process.exit(0), 5_000).unref();

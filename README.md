@@ -14,7 +14,8 @@ reply, send files and voice notes, and set up a group — just by asking.
 [![MCP](https://img.shields.io/badge/MCP-any%20client-8A2BE2)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Works with **Claude Code · Claude Desktop · Gemini CLI · Codex · Cursor · VS Code** — any MCP client.
+Works with **Claude Code · Claude Desktop · Gemini CLI · Codex · Cursor · VS Code** — any MCP client —
+and, [on a server](docs/hosted.md), with **claude.ai on the web and on your phone**.
 
 </div>
 
@@ -50,8 +51,9 @@ Works with **Claude Code · Claude Desktop · Gemini CLI · Codex · Cursor · V
   reactions, polls.
 - 🎙️ **Voice notes become text** — through OpenAI, ElevenLabs or Whisper running locally, if you
   want it.
-- 🔒 **Local-first.** No cloud service in the middle and no account to create. Your archive lives on
-  your machine; your assistant only sees what it reads through a tool you allowed.
+- 🔒 **Yours.** No cloud service in the middle and no account to create. Your archive lives on
+  your machine — or on a server of yours, behind a login only you know — and your assistant only
+  sees what it reads through a tool you allowed.
 - 🧩 **Any MCP client.** One server for every assistant you use, today and tomorrow.
 - 🐳 **Three commands to install.** A ready-made Docker image for Mac, Windows, Linux and servers:
   nothing to compile, no Go or Python toolchain.
@@ -102,9 +104,9 @@ The server speaks MCP over Streamable HTTP at `http://127.0.0.1:8091/mcp`:
 
 </details>
 
-> **Preview (0.x).** Today it serves the assistants on the same computer. The cloud apps —
-> ChatGPT, claude.ai, the Gemini app — need a public HTTPS address with a login: that hosted mode
-> is the next milestone.
+> **Two ways to run it.** On your computer, as above, for the assistants that run there. Or
+> **on a server**, behind HTTPS with a passphrase login, so that the claude.ai apps — web, phone,
+> and from there your car — can use it as a connector: see [hosted mode](docs/hosted.md).
 
 ## How it works
 
@@ -218,7 +220,8 @@ WhatsApp does not tell.
 
 - [x] Local archive with full-text search, sending, media, voice transcription
 - [x] Polls and groups
-- [ ] Hosted mode: a server with HTTPS and a login, for ChatGPT, claude.ai and phone apps
+- [x] Hosted mode: a server with HTTPS and a login, for claude.ai and the phone apps
+- [ ] ChatGPT and the Gemini app as connectors (same server; to be tried)
 
 Ideas and bug reports are welcome in [Issues](https://github.com/alessio-ragni/wuzapi-mcp/issues).
 If it saves you time, a ⭐ helps others find it.

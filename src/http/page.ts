@@ -1,6 +1,19 @@
 /** The status page: link state, the QR when not linked, archive numbers, and how to connect Claude. */
-export function statusPage(mcpUrl: string): string {
+export function statusPage(mcpUrl: string, hosted = false): string {
   const addCommand = `claude mcp add --transport http --scope user whatsapp ${mcpUrl}`;
+  const connect = hosted
+    ? `<h2>Connect your assistant</h2>
+    <p>In <b>claude.ai</b> (web or phone): Settings → Connectors → <i>Add custom connector</i>. Name it <i>WhatsApp</i>,
+    give it this address, then <i>Connect</i> and sign in with your passphrase. Claude Code shows it on its own once it is there.</p>
+    <pre>${mcpUrl}</pre>
+    <p class="sub" style="margin:0">Claude Code directly, without the connector: <code>${addCommand}</code></p>`
+    : `<h2>Connect Claude Code</h2>
+    <p>Run once in a terminal on this machine, then restart Claude Code:</p>
+    <pre>${addCommand}</pre>
+    <p class="sub" style="margin:0">MCP endpoint: <code>${mcpUrl}</code></p>`;
+  const signOut = hosted
+    ? `<form method="post" action="/logout" style="text-align:center;margin:0 0 16px"><button type="submit">Sign out</button></form>`
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -34,7 +47,7 @@ export function statusPage(mcpUrl: string): string {
 <body>
 <main>
   <h1>wuzapi-mcp</h1>
-  <p class="sub">Your WhatsApp, archived on this machine and available to Claude.</p>
+  <p class="sub">Your WhatsApp, archived ${hosted ? 'on this server' : 'on this machine'} and available to your assistant.</p>
 
   <section>
     <h2>WhatsApp</h2>
@@ -61,11 +74,9 @@ export function statusPage(mcpUrl: string): string {
   </section>
 
   <section>
-    <h2>Connect Claude Code</h2>
-    <p>Run once in a terminal on this machine, then restart Claude Code:</p>
-    <pre>${addCommand}</pre>
-    <p class="sub" style="margin:0">MCP endpoint: <code>${mcpUrl}</code></p>
+    ${connect}
   </section>
+  ${signOut}
   <p id="version" class="sub" style="text-align:center"></p>
 </main>
 <script>
@@ -77,6 +88,7 @@ async function refresh() {
   let s;
   try {
     const res = await fetch('/api/status', { cache: 'no-store' });
+    if (res.status === 401) { location.reload(); return; }
     s = await res.json();
   } catch {
     $('state').textContent = 'wuzapi-mcp is not answering';

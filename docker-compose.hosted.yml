@@ -1,0 +1,31 @@
+# Hosted mode: Caddy in front, with a certificate from Let's Encrypt, and the two services hidden
+# from the network — only Caddy is published. Use it together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.hosted.yml up -d
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.hosted.yml in .env. See docs/hosted.md.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # The host name in PUBLIC_URL. Caddy gets its certificate for it.
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST in .env — the host name of PUBLIC_URL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - wuzapi-mcp
+
+  # Reachable through Caddy only.
+  wuzapi-mcp:
+    ports: !override []
+  wuzapi:
+    ports: !override []
+
+volumes:
+  caddy-data:
+  caddy-config:

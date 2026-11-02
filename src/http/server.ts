@@ -1,7 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { redirectUriMatches } from '@modelcontextprotocol/sdk/server/auth/handlers/authorize.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import { readFileSync } from 'node:fs';
 import type { Archive } from '../archive/archive.ts';
 import type { Config } from '../config.ts';
@@ -10,6 +13,10 @@ import type { Session } from '../session.ts';
 import { registerReadTools } from '../tools/read.ts';
 import { registerWriteTools } from '../tools/write.ts';
 import type { Wuzapi } from '../wuzapi/client.ts';
+import { Owner } from './auth/owner.ts';
+import { loginPage } from './auth/page.ts';
+import { APPROVE_PATH, OwnerAuthProvider } from './auth/provider.ts';
+import type { AuthStore } from './auth/store.ts';
 import { statusPage } from './page.ts';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
@@ -35,9 +42,13 @@ export interface AppDeps {
   archive: Archive;
   wuzapi: Wuzapi;
   session: Session;
+  /** Required in hosted mode: where logins and tokens live. */
+  auth?: AuthStore;
 }
 
-export function buildApp({ config, archive, wuzapi, session }: AppDeps): Express {
+const passThrough: RequestHandler = (_req, _res, next) => next();
+
+export function buildApp({ config, archive, wuzapi, session, auth }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
   // Only the host names this server is meant to be reached by: blocks DNS-rebinding pages in your browser.
@@ -72,8 +83,108 @@ export function buildApp({ config, archive, wuzapi, session }: AppDeps): Express
     }
   });
 
+  // --- hosted mode: the owner's login, and OAuth for the assistants ---
+  // Locally (no passphrase) nothing here is mounted and every route below is open, as it always was.
+  let requireToken: RequestHandler = passThrough;
+  let requireOwner: RequestHandler = passThrough;
+  let owner: Owner | undefined;
+  if (config.hosted) {
+    if (!auth) throw new Error('hosted mode needs an AuthStore');
+    // The only way in is the reverse proxy on the compose network: believe its X-Forwarded-* headers,
+    // so rate limits count the real client and cookies know they travel over https.
+    app.set('trust proxy', true);
+    owner = new Owner(config, auth);
+    const mcpUrl = new URL(`${config.PUBLIC_URL}/mcp`);
+    const provider = new OwnerAuthProvider(auth, owner, mcpUrl);
+    const form = express.urlencoded({ extended: false });
+    const sameOrigin: RequestHandler = (req, res, next) => {
+      if (!owner!.sameOrigin(req)) {
+        res.status(403).json({ error: 'cross-site request refused' });
+        return;
+      }
+      next();
+    };
+
+    // The consent form posts here: passphrase (or a live cookie), then back to the assistant with a code.
+    app.post(APPROVE_PATH, form, sameOrigin, (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const body = req.body as Record<string, string | undefined>;
+      const client = body.client_id ? auth.getClient(body.client_id) : undefined;
+      const redirectUri = body.redirect_uri;
+      if (!client || !redirectUri || !body.code_challenge || !client.redirect_uris.some((r) => redirectUriMatches(redirectUri, r))) {
+        res.status(400).type('html').send(loginPage({ action: APPROVE_PATH, error: 'This authorization request is not valid. Start again from your assistant.' }));
+        return;
+      }
+      const params = {
+        state: body.state,
+        scopes: body.scope ? body.scope.split(' ').filter(Boolean) : [],
+        codeChallenge: body.code_challenge,
+        redirectUri,
+        resource: body.resource ? new URL(body.resource) : undefined,
+      };
+      const again = (error: string, status: number): void => {
+        res.status(status).type('html').send(
+          loginPage({
+            action: APPROVE_PATH,
+            hidden: { client_id: client.client_id, redirect_uri: redirectUri, state: params.state, code_challenge: params.codeChallenge, scope: body.scope, resource: body.resource },
+            client: { name: client.client_name || client.client_id, redirectHost: new URL(redirectUri).host },
+            error,
+          }),
+        );
+      };
+      if (!owner!.isSignedIn(req)) {
+        const verdict = owner!.attempt(req, body.passphrase);
+        if (verdict !== 'ok') {
+          again(verdict === 'blocked' ? 'Too many attempts. Wait a quarter of an hour and try again.' : 'Wrong passphrase.', verdict === 'blocked' ? 429 : 401);
+          return;
+        }
+        owner!.signIn(res);
+      }
+      const code = provider.issueCode(client, params);
+      const target = new URL(redirectUri);
+      target.searchParams.set('code', code);
+      if (params.state) target.searchParams.set('state', params.state);
+      log('authorized', client.client_name || client.client_id, 'for', target.host);
+      res.redirect(302, target.href);
+    });
+
+    // /.well-known/*, /authorize, /token, /register, /revoke — the standard endpoints, from the SDK.
+    // Behind the proxy `trust proxy` is deliberately wide; the limiter would otherwise warn about it at every start.
+    const rateLimit = { validate: { trustProxy: false } };
+    app.use(
+      mcpAuthRouter({
+        provider,
+        issuerUrl: new URL(config.PUBLIC_URL),
+        resourceServerUrl: mcpUrl,
+        resourceName: 'wuzapi-mcp',
+        authorizationOptions: { rateLimit },
+        tokenOptions: { rateLimit },
+        clientRegistrationOptions: { rateLimit },
+        revocationOptions: { rateLimit },
+      }),
+    );
+    requireToken = requireBearerAuth({ verifier: provider, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpUrl), expectedResource: mcpUrl });
+    requireOwner = owner.requireSignedIn();
+
+    // The page's own login.
+    app.post('/login', form, sameOrigin, (req, res) => {
+      const verdict = owner!.attempt(req, (req.body as Record<string, string | undefined>).passphrase);
+      if (verdict !== 'ok') {
+        const error = verdict === 'blocked' ? 'Too many attempts. Wait a quarter of an hour and try again.' : 'Wrong passphrase.';
+        res.status(verdict === 'blocked' ? 429 : 401).type('html').send(loginPage({ action: '/login', error }));
+        return;
+      }
+      owner!.signIn(res);
+      res.redirect(303, '/');
+    });
+    app.post('/logout', form, sameOrigin, (req, res) => {
+      owner!.signOut(req, res);
+      res.redirect(303, '/');
+    });
+  }
+
   // --- MCP: stateless Streamable HTTP, a fresh server per request ---
-  app.post('/mcp', express.json({ limit: '10mb' }), async (req, res) => {
+  app.post('/mcp', requireToken, express.json({ limit: '10mb' }), async (req, res) => {
     const server = buildMcpServer(archive, wuzapi, config);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
@@ -95,19 +206,28 @@ export function buildApp({ config, archive, wuzapi, session }: AppDeps): Express
   app.delete('/mcp', methodNotAllowed);
 
   // --- the page ---
-  app.get('/', (_req, res) => {
-    res.type('html').send(statusPage(`${config.PUBLIC_URL.replace(/\/$/, '')}/mcp`));
+  app.get('/', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (owner && !owner.isSignedIn(req)) {
+      res.type('html').send(loginPage({ action: '/login' }));
+      return;
+    }
+    res.type('html').send(statusPage(`${config.PUBLIC_URL}/mcp`, config.hosted));
   });
 
-  app.get('/api/status', async (_req, res) => {
+  app.get('/api/status', requireOwner, async (_req, res) => {
     const whatsapp = await session.state();
     res.set('Cache-Control', 'no-store').json({ whatsapp, archive: archive.stats(), backfill: session.historyStatus(), version: VERSION });
   });
 
   // JSON only: a plain cross-site form cannot send it, so another web page cannot unlink you.
-  app.post('/api/unlink', express.json(), async (req, res) => {
+  app.post('/api/unlink', requireOwner, express.json(), async (req, res) => {
     if (!req.is('application/json')) {
       res.status(415).json({ error: 'JSON only' });
+      return;
+    }
+    if (owner && !owner.sameOrigin(req)) {
+      res.status(403).json({ error: 'cross-site request refused' });
       return;
     }
     await session.unlink();

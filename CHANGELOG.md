@@ -6,6 +6,18 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Hosted mode: run wuzapi-mcp on a server and use it from the claude.ai apps, web and phone, as a
+  custom connector. Set `PUBLIC_URL`, `PUBLIC_HOST` and `OWNER_PASSPHRASE` in `.env`, start with
+  `docker-compose.hosted.yml` and Caddy terminates HTTPS. The page and the API ask for the
+  passphrase; assistants sign in through OAuth 2.1 (dynamic client registration, PKCE, rotating
+  refresh tokens) and the MCP endpoint takes bearer tokens only. Guide in `docs/hosted.md`.
+
+### Changed
+- `PUBLIC_URL` can be set in `.env`. A public address without `OWNER_PASSPHRASE`, or without
+  `https`, refuses to start.
+- The status page tells how to add the connector when the server is hosted, and has a sign-out.
+
 ## [0.3.0] - 2026-10-31
 
 ### Added
