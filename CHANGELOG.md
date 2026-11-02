@@ -6,6 +6,8 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 - Hosted mode: run wuzapi-mcp on a server and use it from the claude.ai apps, web and phone, as a
   custom connector. Set `PUBLIC_URL`, `PUBLIC_HOST` and `OWNER_PASSPHRASE` in `.env`, start with
