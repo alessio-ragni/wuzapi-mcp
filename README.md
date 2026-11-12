@@ -46,9 +46,15 @@ and, [on a server](docs/hosted.md), with **claude.ai on the web and on your phon
 - 🔎 **Your whole history, searchable.** Every message is archived as it arrives, plus up to a year
   of history from your phone. Full-text search that ignores accents: `caffe` finds *caffè*.
 - 🗳️ **Polls and groups, handled.** See who voted what and who hasn't yet, create a group with the
-  people who said yes, make someone admin, share the invite link.
-- ✍️ **It writes back.** Text replies that quote the original, photos, documents, voice notes,
-  reactions, polls.
+  people who said yes, make someone admin, share the invite link, rename it, change its photo and
+  rules, approve who asks to join.
+- ✍️ **It writes back.** Text replies that quote the original, @mentions, photos, documents, voice
+  notes, stickers, locations, contact cards, reactions, polls and votes — and it can edit or delete
+  what you sent.
+- 🗂️ **Tidy chats.** Archive, pin, mute, mark read or unread — the same on every device.
+- 📎 **Files that stay.** Photos, voice notes and documents are copied the moment they arrive, so
+  they stay downloadable after WhatsApp drops them from its servers — and your assistant shows
+  photos right in the chat, with a download link for everything else.
 - 🎙️ **Voice notes become text** — through OpenAI, ElevenLabs or Whisper running locally, if you
   want it.
 - 🔒 **Yours.** No cloud service in the middle and no account to create. Your archive lives on
@@ -128,9 +134,16 @@ which is why there is no password. Do not publish those ports on a network. One 
 
 ## Tools
 
-| Read | Write | Media |
-|---|---|---|
-| `search_contacts`, `list_chats`, `get_chat`, `list_messages`, `search_messages`, `get_message_context`, `get_last_interaction`, `list_groups`, `get_group_info`, `get_poll_results` | `send_message` (with quoted reply), `send_file`, `send_voice`, `react`, `create_poll`, `create_group`, `update_group_participants`, `get_group_invite_link` | `download_media`, `transcribe_voice` |
+| | Tools |
+|---|---|
+| **Read** | `search_contacts`, `list_chats`, `get_chat`, `list_messages`, `search_messages`, `get_message_context`, `get_last_interaction`, `get_poll_results` |
+| **Send** | `send_message` (quoted replies, @mentions), `send_file`, `send_voice`, `send_sticker`, `send_location`, `send_contact`, `react`, `create_poll`, `vote_poll` |
+| **Your messages** | `edit_message`, `delete_message`, `pin_message`, `star_message` |
+| **Chats** | `manage_chat` — archive, unarchive, pin, unpin, mute, unmute, mark read, mark unread |
+| **Groups** | `list_groups`, `get_group_info`, `create_group`, `update_group` (name, description, photo, who sends, who edits, who adds, disappearing messages, approval), `update_group_participants`, `group_join_requests`, `get_group_invite_link`, `get_group_invite_info`, `join_group`, `leave_group` |
+| **People** | `check_whatsapp`, `get_contact_info` (about, business name, profile photo), `block_contact`, `set_about` |
+| **Channels** | `list_channels`, `manage_channel` — follow, unfollow, mute, unmute |
+| **Media** | `download_media`, `transcribe_voice` |
 
 <details>
 <summary>Details</summary>
@@ -139,7 +152,18 @@ which is why there is no password. Do not publish those ports on a network. One 
 - `send_file` and `send_voice` take the path of a file on your computer, written as you would write
   it (`/Users/me/…` or `C:\Users\me\…`). Only files in your home folder can be sent; it is mounted
   read-only for that. Any audio format works for voice notes; WuzAPI converts it.
-- `download_media` saves into `Downloads/wuzapi-mcp` in your home folder and returns the path.
+- `download_media` shows photos inside the conversation, gives a download link for any file (it
+  works for 24 hours, from any browser, without signing in — treat it like the file itself) and
+  saves a copy in `Downloads/wuzapi-mcp` in your home folder.
+- `delete_message` deletes for everyone: your own messages, and other people's in groups where you
+  are an admin, within the time WhatsApp allows (about two days). `edit_message` works on your own
+  messages for 15 minutes after sending.
+- When someone edits a message, the archive keeps the new text; when someone deletes a message for
+  everyone, the archive deletes it too and keeps only a line saying so.
+- `manage_chat` archives any chat, private or group. As on the phone, an archived chat comes back
+  to the list when someone writes in it.
+- `update_group` takes a JPEG for the group photo. `join_group` and `get_group_invite_info` take a
+  `chat.whatsapp.com` link. Channels are named by their id (`…@newsletter`, from `list_channels`).
 - `get_poll_results` lists who voted what and, in a group, who has not voted yet. Votes are kept
   from the moment they arrive; it can also ask the phone for older ones, but the phone only sends
   messages older than the chat's latest, so a poll that is still the last message cannot be fetched.
@@ -149,8 +173,11 @@ which is why there is no password. Do not publish those ports on a network. One 
 - `transcribe_voice` is off until you choose a provider — see
   [configuration](docs/configuration.md#voice-transcription).
 
-Most clients ask before each tool call unless you allow it; keep that on for the sending and group
-tools.
+Most clients ask before each tool call unless you allow it; keep that on for the sending, deleting,
+blocking and group tools.
+
+Not included, on purpose: typing and online indicators, privacy settings, business labels, call
+handling, and buttons or lists (WhatsApp no longer shows them on ordinary accounts).
 
 </details>
 
@@ -164,8 +191,10 @@ tools.
 - **Linking a WhatsApp starts from an empty archive.** Unlinking — the button on the page, or
   removing the device on your phone — deletes the archive and everything WuzAPI kept.
 - Restarting the computer or the containers keeps everything.
-- Photos, videos, voice notes and documents are not copied in advance; they are downloaded when
-  your assistant asks for one.
+- Photos, voice notes, documents and stickers up to 25 MB are copied as they arrive, while
+  WhatsApp still serves them (it keeps media on its servers for a few weeks only). Videos and larger
+  files are downloaded when your assistant asks for one. `MEDIA_PREFETCH` and `MEDIA_PREFETCH_MAX_MB`
+  change that — see [configuration](docs/configuration.md#media).
 
 ## Update
 
@@ -221,6 +250,8 @@ WhatsApp does not tell.
 - [x] Local archive with full-text search, sending, media, voice transcription
 - [x] Polls and groups
 - [x] Hosted mode: a server with HTTPS and a login, for claude.ai and the phone apps
+- [x] Edit, delete, pin and star messages; archive, pin and mute chats; full group settings;
+      profiles, blocking, channels; media kept on arrival and shown inline
 - [ ] ChatGPT and the Gemini app as connectors (same server; to be tried)
 
 Ideas and bug reports are welcome in [Issues](https://github.com/alessio-ragni/wuzapi-mcp/issues).

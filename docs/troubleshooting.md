@@ -62,6 +62,21 @@ Only files under `FILES_ROOT` — your home folder by default — can be sent. M
 see [configuration](configuration.md#files). Give the path as it is on your computer; on Windows
 `C:\Users\me\…` and `C:/Users/me/…` both work.
 
+## "WhatsApp no longer keeps this file"
+
+WhatsApp keeps media on its servers for a few weeks. A file that arrived before wuzapi-mcp copied
+media on arrival (version 0.5.0), or before it was running, cannot be downloaded any more: open it
+on the phone. Files arriving from now on are copied as they come — see
+[configuration](configuration.md#media) for which kinds.
+
+## A download is not saved to the downloads folder
+
+`download_media` still answers with the file and a link, and says why the copy failed. Usually the
+folder belongs to another user: recreate the container with the current image
+(`docker compose pull && docker compose up -d`), which runs the server as the folder's owner, or
+on Linux give the folder to the image's user with `sudo chown -R 1000:1000 ~/Downloads/wuzapi-mcp`.
+The page shows the problem under *Archive* while it lasts.
+
 ## Windows
 
 - **Docker Desktop does not start, or says it needs WSL 2.** Docker Desktop runs Linux containers
@@ -112,6 +127,14 @@ wuzapi-mcp works around these in WuzAPI 1.1.0; they are reported upstream.
   WuzAPI returns as `loggedIn`/`connected`, and says "Connected!" while nothing is linked.
   wuzapi-mcp's own page shows the QR.
   ([asternic/wuzapi#394](https://github.com/asternic/wuzapi/issues/394))
+
+Two more, reported upstream, limit what can be offered:
+
+- **No media retry.** whatsmeow can ask the phone to upload an expired file again, but WuzAPI has
+  no endpoint for it, so expired media cannot be recovered; wuzapi-mcp copies media on arrival
+  instead.
+- **Archive, pin and mute made on the phone are not forwarded.** wuzapi-mcp can archive, pin and
+  mute chats, but cannot tell which chats you archived elsewhere.
 
 ## Starting over
 

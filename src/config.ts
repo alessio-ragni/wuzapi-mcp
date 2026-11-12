@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+export const MEDIA_KINDS = ['image', 'audio', 'document', 'sticker', 'video'] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
 const schema = z.object({
   WUZAPI_URL: z.url().default('http://wuzapi:8080'),
   WUZAPI_ADMIN_TOKEN: z.string().min(16),
@@ -33,6 +36,24 @@ const schema = z.object({
   DOWNLOADS_DIR: z.string().optional(),
   // Where that folder is mounted inside the container (/downloads in Docker). Defaults to DOWNLOADS_DIR.
   DOWNLOADS_MOUNT: z.string().optional(),
+  // Media copied to DATA_DIR/media as soon as it arrives, while WhatsApp still serves it:
+  // a comma-separated list of image, audio, document, sticker, video — or "all", or "off".
+  MEDIA_PREFETCH: z
+    .string()
+    .default('image,audio,document,sticker')
+    .transform((s, ctx) => {
+      const v = s.trim().toLowerCase();
+      if (v === 'off' || v === 'none') return [] as MediaKind[];
+      if (v === 'all') return [...MEDIA_KINDS];
+      const kinds = v.split(',').map((k) => k.trim()).filter(Boolean);
+      const bad = kinds.filter((k) => !(MEDIA_KINDS as readonly string[]).includes(k));
+      if (bad.length) ctx.addIssue({ code: 'custom', message: `unknown media kind ${bad.join(', ')}: use ${MEDIA_KINDS.join(', ')}, all or off` });
+      return kinds as MediaKind[];
+    }),
+  // Larger files are only downloaded when asked for.
+  MEDIA_PREFETCH_MAX_MB: z.coerce.number().positive().default(25),
+  // How long a download link from download_media works.
+  MEDIA_LINK_HOURS: z.coerce.number().positive().max(24 * 30).default(24),
   TRANSCRIPTION_PROVIDER: z.enum(['off', 'openai', 'elevenlabs', 'whisper-local']).default('off'),
   OPENAI_API_KEY: z.string().optional(),
   ELEVENLABS_API_KEY: z.string().optional(),

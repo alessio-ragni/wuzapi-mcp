@@ -3,6 +3,7 @@ import { Archive } from './archive/archive.ts';
 import { loadConfig } from './config.ts';
 import { AuthStore } from './http/auth/store.ts';
 import { buildApp, VERSION } from './http/server.ts';
+import { MediaStore } from './media/store.ts';
 import { Session } from './session.ts';
 import { Wuzapi } from './wuzapi/client.ts';
 
@@ -13,8 +14,11 @@ const archive = new Archive(join(config.DATA_DIR, 'archive.db'));
 const auth = config.hosted ? new AuthStore(join(config.DATA_DIR, 'auth.db')) : undefined;
 const wuzapi = new Wuzapi(config.WUZAPI_URL, config.WUZAPI_USER_TOKEN, config.WUZAPI_ADMIN_TOKEN);
 const session = new Session(config, wuzapi, archive);
+const media = new MediaStore(config, archive, wuzapi);
+void media.init();
+void media.checkDownloads();
 
-const app = buildApp({ config, archive, wuzapi, session, auth });
+const app = buildApp({ config, archive, wuzapi, session, auth, media });
 const server = app.listen(config.PORT, config.HOST, () => {
   log(`wuzapi-mcp ${VERSION} listening on ${config.HOST}:${config.PORT} — open ${config.PUBLIC_URL}${config.hosted ? ' (hosted: sign-in required)' : ''}`);
 });

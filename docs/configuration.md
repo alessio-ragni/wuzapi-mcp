@@ -68,12 +68,27 @@ and give it what it needs, then `docker compose up -d`.
 The voice note is sent to the provider you choose; with `whisper-local` it never leaves your
 machine.
 
+## Media
+
+WhatsApp keeps photos, voice notes and documents on its servers for a few weeks; after that only the
+phone that received them has a copy. wuzapi-mcp therefore copies media **as it arrives**, into the
+`mcp-data` volume next to the archive, and `download_media` serves it from there.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `MEDIA_PREFETCH` | `image,audio,document,sticker` | Which kinds are copied on arrival: any of `image`, `audio` (voice notes too), `document`, `sticker`, `video`, or `all`, or `off`. History the phone sends when it links is copied for its last 14 days; older media is usually gone from WhatsApp already. |
+| `MEDIA_PREFETCH_MAX_MB` | `25` | Larger files are downloaded only when asked for. |
+| `MEDIA_LINK_HOURS` | `24` | How long a download link from `download_media` works. Anyone with the link can download that one file until then. |
+
+The copies take disk space: the page shows how much. They go when the archive is wiped (a new link
+or an unlink) and when the sender deletes the message for everyone.
+
 ## Files
 
 | Setting | Default | What it does |
 |---|---|---|
 | `FILES_ROOT` | your home folder | The folder `send_file` and `send_voice` can read, mounted **read-only**. Files outside it cannot be sent. |
-| `DOWNLOADS_DIR` | `Downloads/wuzapi-mcp` in your home folder | Where `download_media` saves. Created if missing. |
+| `DOWNLOADS_DIR` | `Downloads/wuzapi-mcp` in your home folder | Where `download_media` saves a copy. Created if missing. The server runs as the owner of this folder, so the files it saves are yours. |
 
 Both are paths **on your computer**, written as you would write them: `/Users/me` on a Mac,
 `/home/me` on Linux, `C:\Users\me` on Windows. The init script fills them in on Windows and leaves

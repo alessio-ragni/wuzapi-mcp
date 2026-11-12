@@ -40,6 +40,20 @@ export interface ArchivedMessage {
   text: string | null;
   quotedId: string | null;
   media: MediaRef | null;
+  /** When the text was last edited by its sender (unix seconds). */
+  editedAt?: number | null;
+  /** When the sender deleted it for everyone: the content is gone, only this mark is kept. */
+  deletedAt?: number | null;
+}
+
+/** A media file kept on disk for a message. */
+export interface MediaFile {
+  chatJid: string;
+  id: string;
+  file: string;
+  mimetype: string;
+  size: number;
+  savedAt: number;
 }
 
 export interface Poll {
@@ -90,6 +104,8 @@ interface MessageRow {
   text: string | null;
   quoted_id: string | null;
   media: string | null;
+  edited_at: number | null;
+  deleted_at: number | null;
 }
 
 interface ChatRow {
@@ -150,6 +166,16 @@ CREATE TABLE IF NOT EXISTS poll_votes (
   ts        INTEGER NOT NULL,
   PRIMARY KEY (poll_id, voter_jid)
 );
+-- Media files kept on disk (DATA_DIR/media), one per message; file is the name inside that folder.
+CREATE TABLE IF NOT EXISTS media_files (
+  chat_jid TEXT NOT NULL,
+  id       TEXT NOT NULL,
+  file     TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  size     INTEGER NOT NULL,
+  saved_at INTEGER NOT NULL,
+  PRIMARY KEY (chat_jid, id)
+);
 CREATE INDEX IF NOT EXISTS messages_chat_time ON messages (chat_jid, timestamp);
 CREATE INDEX IF NOT EXISTS messages_time ON messages (timestamp);
 CREATE INDEX IF NOT EXISTS messages_id ON messages (id);
@@ -183,6 +209,8 @@ function toMessage(row: MessageRow): ArchivedMessage {
     text: row.text,
     quotedId: row.quoted_id,
     media: row.media ? (JSON.parse(row.media) as MediaRef) : null,
+    editedAt: row.edited_at ?? null,
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -202,6 +230,8 @@ export function ftsQuery(text: string): string {
  */
 export class Archive {
   readonly db: Database.Database;
+  /** Called after every wipe: whatever lives next to the archive (media files) goes too. */
+  private readonly wipeListeners: (() => void)[] = [];
 
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -209,6 +239,10 @@ export class Archive {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    // Archives made before edits and deletes were tracked gain the two columns in place.
+    const columns = new Set((this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has('edited_at')) this.db.exec('ALTER TABLE messages ADD COLUMN edited_at INTEGER');
+    if (!columns.has('deleted_at')) this.db.exec('ALTER TABLE messages ADD COLUMN deleted_at INTEGER');
     // Status updates were archived by the first builds; they are not conversations.
     this.db.exec(`DELETE FROM messages WHERE chat_jid = 'status@broadcast'; DELETE FROM chats WHERE jid = 'status@broadcast';`);
   }
@@ -255,9 +289,15 @@ export class Archive {
       DELETE FROM pn_lid;
       DELETE FROM polls;
       DELETE FROM poll_votes;
+      DELETE FROM media_files;
       INSERT INTO messages_fts (messages_fts) VALUES ('rebuild');
     `);
     this.db.exec('VACUUM');
+    for (const listener of this.wipeListeners) listener();
+  }
+
+  onWipe(listener: () => void): void {
+    this.wipeListeners.push(listener);
   }
 
   // --- privacy LIDs ----------------------------------------------------------
@@ -318,6 +358,8 @@ export class Archive {
     this.db.prepare('UPDATE OR IGNORE poll_votes SET voter_jid = @to WHERE voter_jid = @from').run(p);
     this.db.prepare('DELETE FROM poll_votes WHERE voter_jid = @from').run(p);
     this.db.prepare('UPDATE polls SET chat_jid = @to WHERE chat_jid = @from').run(p);
+    this.db.prepare('UPDATE OR IGNORE media_files SET chat_jid = @to WHERE chat_jid = @from').run(p);
+    this.db.prepare('DELETE FROM media_files WHERE chat_jid = @from').run(p);
   }
 
   /** Files a message under phone numbers wherever the LID is known. */
@@ -361,14 +403,16 @@ export class Archive {
   addMessage(m: ArchivedMessage): boolean {
     const result = this.db
       .prepare(
-        `INSERT INTO messages (chat_jid, id, sender_jid, sender_name, from_me, timestamp, type, text, quoted_id, media)
-         VALUES (@chatJid, @id, @senderJid, @senderName, @fromMe, @timestamp, @type, @text, @quotedId, @media)
+        `INSERT INTO messages (chat_jid, id, sender_jid, sender_name, from_me, timestamp, type, text, quoted_id, media, edited_at, deleted_at)
+         VALUES (@chatJid, @id, @senderJid, @senderName, @fromMe, @timestamp, @type, @text, @quotedId, @media, @editedAt, @deletedAt)
          ON CONFLICT (chat_jid, id) DO NOTHING`,
       )
       .run({
         ...m,
         fromMe: m.fromMe ? 1 : 0,
         media: m.media ? JSON.stringify(m.media) : null,
+        editedAt: m.editedAt ?? null,
+        deletedAt: m.deletedAt ?? null,
       });
     this.upsertChat(m.chatJid, { lastMessageAt: m.timestamp });
     if (!m.fromMe && m.senderName) this.upsertContact(m.senderJid, { pushName: m.senderName });
@@ -381,6 +425,55 @@ export class Archive {
       for (const m of messages) if (this.addMessage(m)) added++;
     })();
     return added;
+  }
+
+  /**
+   * The sender deleted a message for everyone: its text and media reference go, a mark stays.
+   * Returns false when the message is not in the archive (or was already deleted).
+   */
+  markDeleted(chatJid: string, id: string, at = Math.floor(Date.now() / 1000)): boolean {
+    const r = this.db
+      .prepare('UPDATE messages SET text = NULL, media = NULL, deleted_at = ? WHERE chat_jid = ? AND id = ? AND deleted_at IS NULL')
+      .run(at, chatJid, id);
+    return r.changes > 0;
+  }
+
+  /** The sender edited a message: the new text replaces the old one. */
+  markEdited(chatJid: string, id: string, text: string, at = Math.floor(Date.now() / 1000)): boolean {
+    const r = this.db
+      .prepare('UPDATE messages SET text = ?, edited_at = ? WHERE chat_jid = ? AND id = ? AND deleted_at IS NULL')
+      .run(text, at, chatJid, id);
+    return r.changes > 0;
+  }
+
+  // --- media files -------------------------------------------------------------
+
+  getMediaFile(chatJid: string, id: string): MediaFile | null {
+    const row = this.db.prepare('SELECT * FROM media_files WHERE chat_jid = ? AND id = ?').get(chatJid, id) as
+      | { chat_jid: string; id: string; file: string; mimetype: string; size: number; saved_at: number }
+      | undefined;
+    return row ? { chatJid: row.chat_jid, id: row.id, file: row.file, mimetype: row.mimetype, size: row.size, savedAt: row.saved_at } : null;
+  }
+
+  putMediaFile(f: MediaFile): void {
+    this.db
+      .prepare(
+        `INSERT INTO media_files (chat_jid, id, file, mimetype, size, saved_at) VALUES (@chatJid, @id, @file, @mimetype, @size, @savedAt)
+         ON CONFLICT (chat_jid, id) DO UPDATE SET file = excluded.file, mimetype = excluded.mimetype, size = excluded.size, saved_at = excluded.saved_at`,
+      )
+      .run(f);
+  }
+
+  /** Forgets a media file and returns its name, so the caller can remove it from disk. */
+  deleteMediaFile(chatJid: string, id: string): string | null {
+    const f = this.getMediaFile(chatJid, id);
+    if (f) this.db.prepare('DELETE FROM media_files WHERE chat_jid = ? AND id = ?').run(chatJid, id);
+    return f?.file ?? null;
+  }
+
+  mediaStats(): { files: number; bytes: number } {
+    const row = this.db.prepare('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM media_files').get() as { files: number; bytes: number };
+    return row;
   }
 
   // --- polls -----------------------------------------------------------------

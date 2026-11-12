@@ -70,7 +70,9 @@ export function statusPage(mcpUrl: string, hosted = false): string {
       <dt>Latest</dt><dd id="newest">–</dd>
       <dt>History</dt><dd id="backfill">–</dd>
       <dt>Without number</dt><dd id="unresolved">–</dd>
+      <dt>Media kept</dt><dd id="media">–</dd>
     </dl>
+    <p id="downloads" class="sub hidden"></p>
   </section>
 
   <section>
@@ -123,6 +125,12 @@ async function refresh() {
   $('newest').textContent = fmt(s.archive.newest);
   $('backfill').textContent = s.backfill;
   $('unresolved').textContent = num(s.archive.unresolved) + ' chats known only by a privacy ID';
+  if (s.media) {
+    const mb = (s.media.bytes / 1048576).toFixed(s.media.bytes < 10485760 ? 1 : 0);
+    $('media').textContent = num(s.media.files) + ' files, ' + mb + ' MB' + (s.media.pending ? ' — ' + num(s.media.pending) + ' being copied' : '');
+    $('downloads').textContent = s.media.downloadsProblem ? 'Downloads folder: ' + s.media.downloadsProblem : '';
+    $('downloads').classList.toggle('hidden', !s.media.downloadsProblem);
+  }
   $('version').textContent = 'wuzapi-mcp ' + s.version;
 }
 

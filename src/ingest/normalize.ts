@@ -180,6 +180,68 @@ function votesFromWeb(web: Obj, pollId: string, isGroup: boolean, chatJid: strin
   return votes;
 }
 
+/** An edit or a delete-for-everyone of an earlier message. */
+export interface Revision {
+  kind: 'edit' | 'delete';
+  chatJid: string;
+  /** The message that was edited or deleted. */
+  targetId: string;
+  /** The new text, for an edit. */
+  text?: string;
+  timestamp: number;
+}
+
+// ProtocolMessage.Type: WuzAPI forwards the enum as a number; accept the name as well.
+const REVOKE = new Set<unknown>([0, '0', 'REVOKE']);
+const MESSAGE_EDIT = new Set<unknown>([14, '14', 'MESSAGE_EDIT']);
+
+/** Text of an edited message: the new body or caption. */
+function editedText(message: Obj): string | null {
+  const m = unwrap(message);
+  return (
+    str(m.conversation) ??
+    str(obj(m.extendedTextMessage)?.text) ??
+    str(obj(m.imageMessage)?.caption) ??
+    str(obj(m.videoMessage)?.caption) ??
+    str(obj(m.documentMessage)?.caption) ??
+    null
+  );
+}
+
+/** The chat a live event belongs to, filed the way fromMessageEvent files it. */
+function chatOfInfo(info: Obj): string | undefined {
+  const rawChat = str(info.Chat);
+  if (!rawChat) return undefined;
+  const fromMe = info.IsFromMe === true;
+  const isGroup = info.IsGroup === true || rawChat.endsWith('@g.us');
+  return isGroup ? bareJid(rawChat) : preferPn(rawChat, str(fromMe ? info.RecipientAlt : info.SenderAlt));
+}
+
+/** A live `Message` event that edits or deletes an earlier message, or null for anything else. */
+export function revisionFromEvent(event: Obj): Revision | null {
+  const info = obj(event.Info) ?? {};
+  const message = obj(event.Message) ?? obj(event.RawMessage);
+  if (!message) return null;
+  const protocol = obj(unwrap(message).protocolMessage);
+  if (!protocol) return null;
+  const key = obj(protocol.key) ?? {};
+  const targetId = str(key.ID) ?? str(key.id);
+  const chatJid = chatOfInfo(info);
+  if (!targetId || !chatJid || isStatus(chatJid)) return null;
+  const ts = str(info.Timestamp) ? Math.floor(Date.parse(str(info.Timestamp)!) / 1000) : NaN;
+  const timestamp = Number.isFinite(ts) && ts > 0 ? ts : Math.floor(Date.now() / 1000);
+  if (REVOKE.has(protocol.type)) return { kind: 'delete', chatJid, targetId, timestamp };
+  if (MESSAGE_EDIT.has(protocol.type)) {
+    const edited = obj(protocol.editedMessage);
+    const text = edited ? editedText(edited) : null;
+    return text === null ? null : { kind: 'edit', chatJid, targetId, text, timestamp };
+  }
+  return null;
+}
+
+// WebMessageInfo.StubType REVOKE: the phone keeps a deleted message as an empty stub.
+const STUB_REVOKE = new Set<unknown>([1, '1', 'REVOKE']);
+
 /** A live message, or a row of WuzAPI's stored history: `{ Info, Message }`. */
 export function fromMessageEvent(event: Obj, fallback: { id?: string; chatJid?: string; timestamp?: number } = {}): ArchivedMessage | null {
   const info = obj(event.Info) ?? {};
@@ -245,11 +307,15 @@ export interface HistoryBatch {
   votes: PollVote[];
   chats: { jid: string; name: string | null }[];
   pushNames: { jid: string; name: string }[];
+  /** Messages the phone holds only as "this message was deleted". */
+  deleted: { chatJid: string; id: string; senderJid: string; fromMe: boolean; timestamp: number }[];
+  /** Edits and deletes carried as messages of their own. */
+  revisions: Revision[];
 }
 
 /** Everything useful in a HistorySync event's `Data`. */
 export function fromHistorySync(data: Obj): HistoryBatch {
-  const batch: HistoryBatch = { messages: [], polls: [], votes: [], chats: [], pushNames: [] };
+  const batch: HistoryBatch = { messages: [], polls: [], votes: [], chats: [], pushNames: [], deleted: [], revisions: [] };
   const conversations = Array.isArray(data.conversations) ? data.conversations : [];
   for (const c of conversations) {
     if (!isObj(c)) continue;
@@ -263,6 +329,34 @@ export function fromHistorySync(data: Obj): HistoryBatch {
     for (const entry of messages) {
       const web = obj(obj(entry)?.message);
       if (!web) continue;
+      if (STUB_REVOKE.has(web.messageStubType)) {
+        const key = obj(web.key) ?? {};
+        const id = str(key.ID) ?? str(key.id);
+        if (id) {
+          const fromMe = key.fromMe === true;
+          const participant = str(key.participant) ?? str(web.participant);
+          const isGroup = jid.endsWith('@g.us');
+          batch.deleted.push({
+            chatJid: jid,
+            id,
+            senderJid: fromMe ? 'me' : bareJid(isGroup ? (participant ?? jid) : jid),
+            fromMe,
+            timestamp: num(web.messageTimestamp) ?? Math.floor(Date.now() / 1000),
+          });
+        }
+        continue;
+      }
+      const inner = obj(web.message);
+      const protocol = inner ? obj(unwrap(inner).protocolMessage) : undefined;
+      if (protocol) {
+        const targetId = str(obj(protocol.key)?.ID) ?? str(obj(protocol.key)?.id);
+        const timestamp = num(web.messageTimestamp) ?? Math.floor(Date.now() / 1000);
+        const edited = obj(protocol.editedMessage);
+        const text = edited ? editedText(edited) : null;
+        if (targetId && REVOKE.has(protocol.type)) batch.revisions.push({ kind: 'delete', chatJid: jid, targetId, timestamp });
+        else if (targetId && MESSAGE_EDIT.has(protocol.type) && text !== null) batch.revisions.push({ kind: 'edit', chatJid: jid, targetId, text, timestamp });
+        continue;
+      }
       const m = fromWebMessage(web, jid);
       if (!m) continue;
       batch.messages.push(m);

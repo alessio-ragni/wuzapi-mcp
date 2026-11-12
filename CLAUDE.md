@@ -23,7 +23,10 @@ A public, MIT-licensed MCP server for WhatsApp on top of WuzAPI. See `README.md`
 - The archive (`src/archive/`) holds one account. A new link (`PairSuccess`) or an unlink
   (`LoggedOut`, or the page's button) wipes it; unlinking also deletes the WuzAPI user with its data.
   On start it imports what WuzAPI already stored (`/chat/conversations`, `/chat/messages`).
-- WuzAPI runs with `-skipmedia`: webhooks carry media references, files are downloaded on request.
+- WuzAPI runs with `-skipmedia`: webhooks carry media references. `src/media/store.ts` copies media
+  into `DATA_DIR/media` on arrival (`MEDIA_PREFETCH`) or on request, and signs expiring download
+  links (`/media/<token>`). Edits and deletes-for-everyone update the archive (`deleted_at` keeps a
+  mark, the content goes).
 - Privacy LIDs: everything is filed under phone-number JIDs where possible. `pn_lid` in the archive
   maps numbers to LIDs (looked up per contact via `GET /user/lid/{jid}`, weekly); `recordLid`
   merges LID chats into the number, `canonical()` maps new messages.

@@ -43,6 +43,9 @@ $lines = Get-Content '.env.example' | ForEach-Object {
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText((Join-Path (Get-Location) '.env'), (($lines -join "`n") + "`n"), $utf8)
 
+# The folder downloads land in, made now so Docker does not have to.
+New-Item -ItemType Directory -Force -Path (Join-Path $userHome 'Downloads\wuzapi-mcp') | Out-Null
+
 Write-Host 'Created .env with random secrets.'
 if (-not $tz) { Write-Host 'Time zone left as UTC: set TZ=Europe/Rome (or yours) in .env to see local times.' }
 Write-Host 'Next: docker compose up -d, then open http://127.0.0.1:8091'
