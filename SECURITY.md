@@ -30,10 +30,16 @@ wuzapi-mcp gives an AI assistant your WhatsApp. Read this before you connect it.
 - **Files.** Files can be sent only from `FILES_ROOT` — your home folder by default — which is
   mounted read-only; the check is on the resolved path, so symlinks cannot escape it. Downloads go
   to `DOWNLOADS_DIR`, `Downloads/wuzapi-mcp` in your home folder by default.
+- **Download links.** `download_media` returns a link that downloads one file without a login, so
+  that it opens on a phone. It names one message, expires after `MEDIA_LINK_HOURS` (24 by default),
+  and is signed with HMAC-SHA256 under a random key kept in the archive: it cannot be altered to
+  reach another file, and wiping the archive voids every link. Until it expires, treat it like the
+  file itself.
 - **Messages are untrusted.** Anyone who can message you can put instructions in a message. Tool
   descriptions and server instructions say so, but the real protection is you: keep Claude Code's
-  confirmation on for `send_message`, `send_file`, `send_voice`, `react` and `create_poll`, and be
-  wary of combining this server with tools that reach the internet.
+  confirmation on for the sending tools and for `delete_message`, `leave_group`,
+  `update_group_participants` and `block_contact`, and be wary of combining this server with tools
+  that reach the internet.
 - **At rest.** The archive is a plain SQLite file inside a Docker volume on your disk, as protected
   as your user account and disk encryption make it. Unlinking deletes it.
 - **Not an official API.** WuzAPI uses the WhatsApp Web protocol. WhatsApp can restrict numbers that

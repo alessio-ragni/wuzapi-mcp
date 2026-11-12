@@ -12,9 +12,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 ENV NODE_ENV=production DATA_DIR=/data
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data && chown node:node /data && chmod 755 /usr/local/bin/docker-entrypoint.sh
 VOLUME /data
 EXPOSE 3000
-USER node
+# Starts as root to fix the ownership of the mounted folders, then drops to an ordinary user.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "src/main.ts"]

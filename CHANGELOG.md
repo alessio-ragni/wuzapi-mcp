@@ -6,6 +6,35 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Delete messages for everyone (`delete_message`: your own, and other people's in groups you
+  administer), edit your messages (`edit_message`), pin and star them (`pin_message`,
+  `star_message`), vote on polls (`vote_poll`).
+- `manage_chat`: archive or unarchive any chat or group, pin it, mute it, mark it read or unread.
+- Groups: `update_group` changes name, description, photo, who can send, who can edit the info, who
+  can add members, disappearing messages and join approval in one call, reporting each change;
+  `group_join_requests` lists, approves and rejects people asking to join; `get_group_invite_info`,
+  `join_group` and `leave_group`.
+- People: `check_whatsapp`, `get_contact_info` (about, business name, profile photo),
+  `block_contact`, `set_about`. Channels: `list_channels`, `manage_channel`.
+- Sending: @mentions and mention-all in `send_message`, `send_location`, `send_contact`,
+  `send_sticker`.
+- Media is copied as it arrives (photos, voice notes, documents and stickers up to 25 MB by default;
+  `MEDIA_PREFETCH`, `MEDIA_PREFETCH_MAX_MB`), so it stays downloadable after WhatsApp's servers drop
+  it. The page shows how much is kept.
+
+### Changed
+- `download_media` shows photos inside the answer, returns a download link that works from any
+  browser for `MEDIA_LINK_HOURS` (24 by default) — the way to get files from claude.ai on the phone —
+  and still saves a copy in the downloads folder.
+- Edits and deletes made by anyone reach the archive: an edited message shows its new text, marked
+  edited; a message deleted for everyone loses its content and keeps only a mark.
+- The container runs as the owner of the downloads folder, so downloads work on a server without
+  opening the folder up by hand. The init scripts create the folder.
+
+### Fixed
+- An expired media file reports that WhatsApp no longer keeps it, instead of a bare 403.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added

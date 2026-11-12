@@ -21,6 +21,9 @@ sed \
   .env.example > .env
 chmod 600 .env
 
+# Made now, so it belongs to you; Docker would otherwise create it as root.
+mkdir -p "$HOME/Downloads/wuzapi-mcp"
+
 # Show times in your own time zone.
 tz=""
 if [[ -L /etc/localtime ]]; then tz=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||'); fi

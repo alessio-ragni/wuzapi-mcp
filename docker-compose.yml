@@ -48,6 +48,10 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:${MCP_HOST_PORT:-8091}}
       OWNER_PASSPHRASE: ${OWNER_PASSPHRASE:-}
       PUBLIC_HOST: ${PUBLIC_HOST:-}
+      # Media copied on arrival, and how long download links work — see docs/configuration.md#media.
+      MEDIA_PREFETCH: ${MEDIA_PREFETCH:-}
+      MEDIA_PREFETCH_MAX_MB: ${MEDIA_PREFETCH_MAX_MB:-}
+      MEDIA_LINK_HOURS: ${MEDIA_LINK_HOURS:-}
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-off}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}

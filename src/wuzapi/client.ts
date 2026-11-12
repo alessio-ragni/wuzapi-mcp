@@ -86,6 +86,40 @@ export interface MediaDownload {
   FileLength?: number;
 }
 
+export interface UserCheck {
+  Query: string;
+  IsInWhatsapp: boolean;
+  JID: string;
+  VerifiedName?: string;
+}
+
+export interface UserInfo {
+  Status?: string;
+  PictureID?: string;
+  VerifiedName?: { Details?: { verifiedName?: string } } | null;
+  Devices?: string[] | null;
+  LID?: string;
+}
+
+export interface JoinRequest {
+  JID: string;
+  RequestedAt?: string;
+}
+
+/** A channel (newsletter), as whatsmeow describes it. Only the fields we show. */
+export interface Channel {
+  id: string;
+  state?: { type?: string };
+  thread_metadata?: {
+    name?: { text?: string };
+    description?: { text?: string };
+    invite?: string;
+    subscribers_count?: string | number;
+    verification?: string;
+  };
+  viewer_metadata?: { mute?: string; role?: string } | null;
+}
+
 export interface ReplyTo {
   messageId: string;
   participant: string;
@@ -255,14 +289,19 @@ export class Wuzapi {
 
   // --- sending ---------------------------------------------------------------
 
-  private contextInfo(reply?: ReplyTo) {
+  private contextInfo(reply?: ReplyTo): { ContextInfo?: Record<string, unknown>; QuotedText?: string } {
     return reply
       ? { ContextInfo: { StanzaID: reply.messageId, Participant: reply.participant }, QuotedText: reply.quotedText ?? '' }
       : {};
   }
 
-  sendText(to: string, body: string, reply?: ReplyTo): Promise<SendResult> {
-    return this.call('POST', '/chat/send/text', { body: { Phone: to, Body: body, LinkPreview: true, ...this.contextInfo(reply) } });
+  /** Sends text; `mentions` are JIDs tagged with @, `mentionAll` tags every member of a group. */
+  sendText(to: string, body: string, reply?: ReplyTo, mentions: string[] = [], mentionAll = false): Promise<SendResult> {
+    const context = this.contextInfo(reply);
+    if (mentions.length) context.ContextInfo = { ...(context.ContextInfo ?? {}), MentionedJID: mentions };
+    return this.call('POST', '/chat/send/text', {
+      body: { Phone: to, Body: body, LinkPreview: true, ...context, ...(mentionAll ? { MentionAll: true } : {}) },
+    });
   }
 
   sendImage(to: string, dataUrl: string, caption?: string, reply?: ReplyTo): Promise<SendResult> {
@@ -302,6 +341,192 @@ export class Wuzapi {
         ...(participant ? { Participant: participant } : {}),
       },
     });
+  }
+
+  // --- message actions -------------------------------------------------------
+
+  /** Deletes a message for everyone. `sender` only to delete someone else's message in a group you administer. */
+  deleteMessage(chatJid: string, messageId: string, sender?: string): Promise<{ Id: string }> {
+    return this.call('POST', '/chat/delete', { body: { Phone: chatJid, Id: messageId, ...(sender ? { SenderJID: sender } : {}) } });
+  }
+
+  editMessage(chatJid: string, messageId: string, body: string): Promise<SendResult> {
+    return this.call('POST', '/chat/send/edit', { body: { Phone: chatJid, Id: messageId, Body: body } });
+  }
+
+  /** Pins a message for everyone in the chat (1, 7 or 30 days), or unpins it. */
+  pinMessage(chatJid: string, messageId: string, pin: boolean, sender?: string, durationSeconds?: number): Promise<unknown> {
+    return this.call('POST', '/chat/pin', {
+      body: { Chat: chatJid, Id: messageId, Pin: pin, ...(sender ? { Sender: sender } : {}), ...(pin && durationSeconds ? { DurationSeconds: durationSeconds } : {}) },
+    });
+  }
+
+  starMessage(chatJid: string, messageId: string, fromMe: boolean, star: boolean, sender?: string): Promise<unknown> {
+    return this.call('POST', '/chat/star', { body: { Chat: chatJid, Id: messageId, FromMe: fromMe, Star: star, ...(sender ? { Sender: sender } : {}) } });
+  }
+
+  /** Votes on a poll; `sender` is whoever created it. An empty list withdraws the vote. */
+  votePoll(chatJid: string, pollId: string, sender: string, fromMe: boolean, options: string[]): Promise<SendResult> {
+    return this.call('POST', '/chat/poll/vote', { body: { Chat: chatJid, Sender: sender, Id: pollId, FromMe: fromMe, Options: options } });
+  }
+
+  markRead(chatJid: string, messageIds: string[], sender?: string): Promise<unknown> {
+    return this.call('POST', '/chat/markread', { body: { Id: messageIds, ChatPhone: chatJid, ...(sender ? { SenderPhone: sender } : {}) } });
+  }
+
+  // --- chat list -------------------------------------------------------------
+
+  archiveChat(chatJid: string, archive: boolean): Promise<unknown> {
+    return this.call('POST', '/chat/archive', { body: { jid: chatJid, archive } });
+  }
+
+  pinChat(chatJid: string, pin: boolean): Promise<unknown> {
+    return this.call('POST', '/chat/pinchat', { body: { Chat: chatJid, Pin: pin } });
+  }
+
+  /** Mutes a chat for `seconds`, or for ever with 0; unmutes with mute=false. */
+  muteChat(chatJid: string, mute: boolean, seconds = 0): Promise<unknown> {
+    return this.call('POST', '/chat/mute', { body: { Chat: chatJid, Mute: mute, ...(mute && seconds ? { DurationSeconds: seconds } : {}) } });
+  }
+
+  markChatUnread(chatJid: string, unread: boolean): Promise<unknown> {
+    return this.call('POST', '/chat/unread', { body: { Chat: chatJid, Unread: unread } });
+  }
+
+  // --- more sending ------------------------------------------------------------
+
+  sendLocation(to: string, latitude: number, longitude: number, name?: string, reply?: ReplyTo): Promise<SendResult> {
+    return this.call('POST', '/chat/send/location', { body: { Phone: to, Latitude: latitude, Longitude: longitude, Name: name ?? '', ...this.contextInfo(reply) } });
+  }
+
+  sendContact(to: string, name: string, vcard: string, reply?: ReplyTo): Promise<SendResult> {
+    return this.call('POST', '/chat/send/contact', { body: { Phone: to, Name: name, Vcard: vcard, ...this.contextInfo(reply) } });
+  }
+
+  /** Sends an image (or short video) as a sticker; WuzAPI converts it to WebP. */
+  sendSticker(to: string, dataUrl: string, mimetype: string, reply?: ReplyTo): Promise<SendResult> {
+    return this.call('POST', '/chat/send/sticker', { body: { Phone: to, Sticker: dataUrl, MimeType: mimetype, ...this.contextInfo(reply) }, timeoutMs: 120_000 });
+  }
+
+  // --- group settings ----------------------------------------------------------
+
+  setGroupName(groupJid: string, name: string): Promise<unknown> {
+    return this.call('POST', '/group/name', { body: { GroupJID: groupJid, Name: name } });
+  }
+
+  setGroupTopic(groupJid: string, topic: string): Promise<unknown> {
+    return this.call('POST', '/group/topic', { body: { GroupJID: groupJid, Topic: topic } });
+  }
+
+  /** Sets the group picture: a JPEG, as a data URL. */
+  setGroupPhoto(groupJid: string, jpegDataUrl: string): Promise<{ PictureID?: string }> {
+    return this.call('POST', '/group/photo', { body: { GroupJID: groupJid, Image: jpegDataUrl }, timeoutMs: 60_000 });
+  }
+
+  removeGroupPhoto(groupJid: string): Promise<unknown> {
+    return this.call('POST', '/group/photo/remove', { body: { groupjid: groupJid } });
+  }
+
+  /** Only admins send messages (announce), or everyone does. */
+  setGroupAnnounce(groupJid: string, announce: boolean): Promise<unknown> {
+    return this.call('POST', '/group/announce', { body: { GroupJID: groupJid, Announce: announce } });
+  }
+
+  /** Only admins edit the name, description and picture (locked), or everyone does. */
+  setGroupLocked(groupJid: string, locked: boolean): Promise<unknown> {
+    return this.call('POST', '/group/locked', { body: { groupjid: groupJid, locked } });
+  }
+
+  setDisappearing(groupJid: string, duration: 'off' | '24h' | '7d' | '90d'): Promise<unknown> {
+    return this.call('POST', '/group/ephemeral', { body: { groupjid: groupJid, duration } });
+  }
+
+  setJoinApproval(groupJid: string, on: boolean): Promise<unknown> {
+    return this.call('POST', '/group/joinapprovalmode', { body: { groupjid: groupJid, mode: on } });
+  }
+
+  leaveGroup(groupJid: string): Promise<unknown> {
+    return this.call('POST', '/group/leave', { body: { GroupJID: groupJid } });
+  }
+
+  /** What a group invite link leads to, without joining. */
+  inviteInfo(code: string): Promise<GroupInfo> {
+    return this.call('POST', '/group/inviteinfo', { body: { Code: code } });
+  }
+
+  joinGroup(code: string): Promise<unknown> {
+    return this.call('POST', '/group/join', { body: { Code: code }, timeoutMs: 60_000 });
+  }
+
+  async joinRequests(groupJid: string): Promise<JoinRequest[]> {
+    const data = await this.call<JoinRequest[] | null>('GET', `/group/requestparticipants?groupJID=${encodeURIComponent(groupJid)}`);
+    return data ?? [];
+  }
+
+  answerJoinRequests(groupJid: string, people: string[], action: 'approve' | 'reject'): Promise<unknown> {
+    return this.call('POST', '/group/updaterequestparticipants', { body: { GroupJID: groupJid, Phone: people, Action: action } });
+  }
+
+  // --- people ------------------------------------------------------------------
+
+  /** Which numbers have WhatsApp. Digits only, with country code. */
+  async checkUsers(phones: string[]): Promise<UserCheck[]> {
+    const data = await this.call<{ Users: UserCheck[] | null }>('POST', '/user/check', { body: { Phone: phones.map((p) => `+${p.replace(/^\+/, '')}`) } });
+    return data?.Users ?? [];
+  }
+
+  async userInfo(jids: string[]): Promise<Record<string, UserInfo>> {
+    const data = await this.call<{ Users: Record<string, UserInfo> | null }>('POST', '/user/info', { body: { Phone: jids } });
+    return data?.Users ?? {};
+  }
+
+  /** Where to fetch someone's profile picture, or null when they have none or hide it from you. */
+  async avatar(jid: string, preview = false): Promise<{ url: string; id?: string } | null> {
+    try {
+      const data = await this.call<{ url?: string; URL?: string; id?: string; ID?: string }>('POST', '/user/avatar', { body: { Phone: jid, Preview: preview } });
+      const url = data?.url ?? data?.URL;
+      return url ? { url, id: data?.id ?? data?.ID } : null;
+    } catch (err) {
+      if (/no avatar|not-authorized|item-not-found|\b40[134]\b/i.test((err as Error).message)) return null;
+      throw err;
+    }
+  }
+
+  block(jid: string): Promise<unknown> {
+    return this.call('POST', '/user/block', { body: { JID: jid } });
+  }
+
+  unblock(jid: string): Promise<unknown> {
+    return this.call('POST', '/user/unblock', { body: { JID: jid } });
+  }
+
+  async blocklist(): Promise<string[]> {
+    const data = await this.call<{ Blocklist?: string[] | null }>('GET', '/user/blocklist');
+    return data?.Blocklist ?? [];
+  }
+
+  /** Your own "about" text. */
+  setAbout(text: string): Promise<unknown> {
+    return this.call('POST', '/status/set/text', { body: { Body: text } });
+  }
+
+  // --- channels ----------------------------------------------------------------
+
+  async channels(): Promise<Channel[]> {
+    const data = await this.call<{ Newsletter?: Channel[] | null }>('GET', '/newsletter/list');
+    return data?.Newsletter ?? [];
+  }
+
+  followChannel(jid: string): Promise<unknown> {
+    return this.call('POST', '/newsletter/join', { body: { NewsletterJID: jid } });
+  }
+
+  unfollowChannel(jid: string): Promise<unknown> {
+    return this.call('POST', '/newsletter/leave', { body: { NewsletterJID: jid } });
+  }
+
+  muteChannel(jid: string, mute: boolean): Promise<unknown> {
+    return this.call('POST', '/newsletter/mute', { body: { NewsletterJID: jid, Mute: mute } });
   }
 
   // --- media -------------------------------------------------------------------

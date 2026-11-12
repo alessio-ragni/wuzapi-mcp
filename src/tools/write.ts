@@ -1,10 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { readFile, realpath, stat, mkdir, writeFile } from 'node:fs/promises';
 import { basename, extname, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { Archive } from '../archive/archive.ts';
 import type { Config } from '../config.ts';
 import { containerToHost, hostToContainer } from '../paths.ts';
+import { MediaExpiredError, fileNameFor, type MediaStore } from '../media/store.ts';
 import { transcribe } from '../transcribe.ts';
 import type { GroupParticipant, ReplyTo, Wuzapi } from '../wuzapi/client.ts';
 import { UNTRUSTED, fail, formatTime, phoneOf, text } from './format.ts';
@@ -19,7 +21,6 @@ const MIME: Record<string, string> = {
   '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
-const EXT: Record<string, string> = Object.fromEntries(Object.entries(MIME).map(([e, m]) => [m, e]));
 
 const mimeOf = (path: string) => MIME[extname(path).toLowerCase()] ?? 'application/octet-stream';
 const MAX_BYTES = 64 * 1024 * 1024;
@@ -28,7 +29,7 @@ const MAX_BYTES = 64 * 1024 * 1024;
  * Reads a file Claude wants to send, refusing anything outside FILES_ROOT. `path` is a host path
  * (what the user would type); it is mapped to the container mount before being opened.
  */
-async function readAllowed(config: Config, path: string): Promise<{ data: Buffer; name: string; mimetype: string }> {
+export async function readAllowed(config: Config, path: string): Promise<{ data: Buffer; name: string; mimetype: string }> {
   if (!config.FILES_ROOT || !config.FILES_MOUNT) throw new Error('Sending files is off: FILES_ROOT is not set.');
   const outside = new Error(`${path} is outside ${config.FILES_ROOT}, the folder files can be sent from.`);
   const inside = hostToContainer(path, config.FILES_ROOT, config.FILES_MOUNT);
@@ -46,7 +47,17 @@ async function readAllowed(config: Config, path: string): Promise<{ data: Buffer
 
 const dataUrl = (mimetype: string, data: Buffer) => `data:${mimetype};base64,${data.toString('base64')}`;
 
-export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: Wuzapi, config: Config): void {
+/** A vCard 3.0 for one person; waid makes WhatsApp offer "Message" on the card. */
+export function vcard(name: string, digits: string): string {
+  const safe = name.replace(/[\r\n]+/g, ' ').replace(/([,;\\])/g, '\\$1');
+  return ['BEGIN:VCARD', 'VERSION:3.0', `FN:${safe}`, `N:${safe};;;;`, `TEL;type=CELL;type=VOICE;waid=${digits}:+${digits}`, 'END:VCARD'].join('\n');
+}
+
+const INLINE_IMAGE_BYTES = 3_500_000;
+const INLINE_TEXT_BYTES = 100_000;
+const INLINE_FILE_BYTES = 5 * 1024 * 1024;
+
+export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: Wuzapi, config: Config, media: MediaStore): void {
   /** What WuzAPI needs to quote a message: its id and who wrote it. */
   const replyTo = (messageId: string | undefined, chatJid: string): ReplyTo | undefined => {
     if (!messageId) return undefined;
@@ -64,17 +75,93 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
     'send_message',
     {
       title: 'Send message',
-      description: 'Send a WhatsApp text message to a person or a group, optionally as a reply quoting an earlier message.',
+      description:
+        'Send a WhatsApp text message to a person or a group, optionally as a reply quoting an earlier message. ' +
+        'In a group you can tag people (mentions) or everyone (mention_all); *bold*, _italic_ and ~strikethrough~ work as on the phone.',
       inputSchema: {
         to: recipient,
         text: z.string().min(1),
         reply_to: z.string().optional().describe('Id of the message to quote (from the read tools)'),
+        mentions: z
+          .array(z.string())
+          .default([])
+          .describe('People to tag, by phone number or JID. Their @number is added to the text where it is missing.'),
+        mention_all: z.boolean().default(false).describe('Tag every member of the group (groups only)'),
       },
       annotations: write,
     },
-    async ({ to, text: body, reply_to }) => {
+    async ({ to, text: body, reply_to, mentions, mention_all }) => {
       const jid = toJid(to);
-      const r = await wuzapi.sendText(jid, body, replyTo(reply_to, jid));
+      if (mention_all && !jid.endsWith('@g.us')) return fail('mention_all works in groups only.');
+      const tagged = [...new Set(mentions.map((p) => toJid(p)))];
+      // WhatsApp shows a tag only where the text has @number.
+      const missing = tagged.map(phoneOf).filter((p) => !body.includes(`@${p}`));
+      const finalBody = missing.length ? `${body} ${missing.map((p) => `@${p}`).join(' ')}` : body;
+      const r = await wuzapi.sendText(jid, finalBody, replyTo(reply_to, jid), tagged, mention_all);
+      return sent(jid, r.Id);
+    },
+  );
+
+  server.registerTool(
+    'send_location',
+    {
+      title: 'Send location',
+      description: 'Send a map location (a pin) to a person or a group.',
+      inputSchema: {
+        to: recipient,
+        latitude: z.number().min(-90).max(90),
+        longitude: z.number().min(-180).max(180),
+        name: z.string().optional().describe('Name of the place, shown under the pin'),
+        reply_to: z.string().optional().describe('Id of the message to quote'),
+      },
+      annotations: write,
+    },
+    async ({ to, latitude, longitude, name, reply_to }) => {
+      const jid = toJid(to);
+      const r = await wuzapi.sendLocation(jid, latitude, longitude, name, replyTo(reply_to, jid));
+      return sent(jid, r.Id);
+    },
+  );
+
+  server.registerTool(
+    'send_contact',
+    {
+      title: 'Send contact card',
+      description: 'Share a contact card (name and phone number) that the recipient can save or message with one tap.',
+      inputSchema: {
+        to: recipient,
+        name: z.string().min(1).describe('Name on the card'),
+        phone: z.string().min(5).describe('The phone number on the card, with country code'),
+        reply_to: z.string().optional().describe('Id of the message to quote'),
+      },
+      annotations: write,
+    },
+    async ({ to, name, phone, reply_to }) => {
+      const jid = toJid(to);
+      const digits = phone.replace(/[^\d]/g, '');
+      if (!digits) return fail(`"${phone}" is not a phone number.`);
+      const r = await wuzapi.sendContact(jid, name, vcard(name, digits), replyTo(reply_to, jid));
+      return sent(jid, r.Id);
+    },
+  );
+
+  server.registerTool(
+    'send_sticker',
+    {
+      title: 'Send sticker',
+      description: 'Send an image from this machine (PNG, JPEG, WebP or GIF) as a WhatsApp sticker; it is converted to a 512×512 sticker.',
+      inputSchema: {
+        to: recipient,
+        path: z.string().describe('Absolute path of the image on this computer'),
+        reply_to: z.string().optional().describe('Id of the message to quote'),
+      },
+      annotations: write,
+    },
+    async ({ to, path, reply_to }) => {
+      const jid = toJid(to);
+      const file = await readAllowed(config, path);
+      if (!file.mimetype.startsWith('image/')) return fail(`${path} is not an image.`);
+      const r = await wuzapi.sendSticker(jid, dataUrl(file.mimetype, file.data), file.mimetype, replyTo(reply_to, jid));
       return sent(jid, r.Id);
     },
   );
@@ -383,38 +470,77 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
 
   // --- media -------------------------------------------------------------------
 
-  const fetchMedia = async (message_id: string, chat_jid: string | undefined) => {
+  const messageWithMedia = (message_id: string, chat_jid: string | undefined) => {
     const m = archive.getMessage(message_id, chat_jid ? toJid(chat_jid) : undefined);
     if (!m) throw new Error(`No message ${message_id} in the archive.`);
-    if (!m.media) throw new Error(`Message ${message_id} has no media.`);
-    const { kind, url, directPath, mediaKey, mimetype, fileEncSHA256, fileSHA256, fileLength } = m.media;
-    const file = await wuzapi.download(kind, {
-      Url: url, DirectPath: directPath, MediaKey: mediaKey, Mimetype: mimetype,
-      FileEncSHA256: fileEncSHA256, FileSHA256: fileSHA256, FileLength: fileLength,
-    });
-    return { message: m, ...file };
+    if (m.deletedAt) throw new Error(`Message ${message_id} was deleted by its sender.`);
+    if (!m.media && !archive.getMediaFile(m.chatJid, m.id)) throw new Error(`Message ${message_id} has no media.`);
+    return m;
   };
 
   server.registerTool(
     'download_media',
     {
       title: 'Download media',
-      description: 'Save a message’s photo, video, audio, document or sticker to this machine and return the file path.',
-      inputSchema: { message_id: z.string(), chat_jid: z.string().optional() },
+      description:
+        'Get a message’s photo, video, audio, document or sticker. Photos come back inside the answer so you can see them, ' +
+        'short text files too; every file also gets a download link the user can open in a browser (it expires), ' +
+        'and a copy in the downloads folder when one is configured. Files are kept from the moment they arrive.',
+      inputSchema: {
+        message_id: z.string(),
+        chat_jid: z.string().optional(),
+        include_file: z
+          .enum(['auto', 'always', 'never'])
+          .default('auto')
+          .describe('auto: photos and short text files inside the answer; always: any file up to 5 MB (e.g. a PDF); never: link and path only'),
+      },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ message_id, chat_jid }) => {
-      const dir = config.DOWNLOADS_MOUNT ?? join(config.DATA_DIR, 'downloads');
-      const { message, mimetype, data } = await fetchMedia(message_id, chat_jid);
-      const mime = mimetype.split(';')[0]!.trim();
-      const name = message.media?.fileName
-        ? `${message_id}-${basename(message.media.fileName)}`
-        : `${message_id}${EXT[mime] ?? (mime.startsWith('audio/ogg') ? '.ogg' : '')}`;
-      await mkdir(dir, { recursive: true });
-      const path = join(dir, name.replace(/[^\w.\-]+/g, '_'));
-      await writeFile(path, data);
-      const shown = config.DOWNLOADS_DIR && config.DOWNLOADS_MOUNT ? containerToHost(path, config.DOWNLOADS_MOUNT, config.DOWNLOADS_DIR) : path;
-      return text(`Saved ${message.type} (${mime}, ${Math.round(data.length / 1024)} KB) to ${shown}`);
+    async ({ message_id, chat_jid, include_file }) => {
+      const m = messageWithMedia(message_id, chat_jid);
+      let file;
+      try {
+        file = await media.get(m);
+      } catch (err) {
+        if (err instanceof MediaExpiredError) return fail(err.message);
+        throw err;
+      }
+      const name = fileNameFor(m, file.mimetype);
+      const kb = Math.max(1, Math.round(file.data.length / 1024));
+      const lines = [`${m.type} from ${archive.displayName(m.senderJid) ?? phoneOf(m.senderJid)}: ${name} (${file.mimetype}, ${kb} KB)`];
+
+      const link = media.link(m.chatJid, m.id);
+      lines.push(`Download link (works until ${formatTime(Math.floor(link.expires.getTime() / 1000))}): ${link.url}`);
+
+      // A copy for programs on the machine wuzapi-mcp runs on (Claude Code, a file manager).
+      if (config.DOWNLOADS_MOUNT) {
+        try {
+          await mkdir(config.DOWNLOADS_MOUNT, { recursive: true });
+          const path = join(config.DOWNLOADS_MOUNT, `${message_id}-${name}`.replace(/[^\w.\-]+/g, '_'));
+          await writeFile(path, file.data);
+          const shown = config.DOWNLOADS_DIR && config.DOWNLOADS_MOUNT !== config.DOWNLOADS_DIR ? containerToHost(path, config.DOWNLOADS_MOUNT, config.DOWNLOADS_DIR) : path;
+          lines.push(`Saved on ${config.hosted ? 'the server' : 'this computer'}: ${shown}`);
+        } catch (err) {
+          lines.push(`Not saved to the downloads folder: ${(await media.checkDownloads()) ?? (err as Error).message}`);
+        }
+      }
+
+      const content: CallToolResult['content'] = [];
+      const isText = /^text\/|^application\/(json|xml|csv)/.test(file.mimetype);
+      const isImage = file.mimetype.startsWith('image/') && file.mimetype !== 'image/gif';
+      if (include_file !== 'never') {
+        if (isImage && file.data.length <= INLINE_IMAGE_BYTES) {
+          content.push({ type: 'image', data: file.data.toString('base64'), mimeType: file.mimetype });
+        } else if (isText && file.data.length <= INLINE_TEXT_BYTES) {
+          content.push({ type: 'resource', resource: { uri: link.url, mimeType: file.mimetype, text: file.data.toString('utf8') } });
+          lines.push(UNTRUSTED);
+        } else if (include_file === 'always' && file.data.length <= INLINE_FILE_BYTES) {
+          content.push({ type: 'resource', resource: { uri: link.url, mimeType: file.mimetype, blob: file.data.toString('base64') } });
+        } else if (m.type === 'voice' || m.type === 'audio') {
+          lines.push('To read what it says, use transcribe_voice.');
+        }
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }, ...content] };
     },
   );
 
@@ -430,9 +556,15 @@ export function registerWriteTools(server: McpServer, archive: Archive, wuzapi: 
       if (config.TRANSCRIPTION_PROVIDER === 'off') {
         return fail('Voice transcription is off. Set TRANSCRIPTION_PROVIDER and its key in .env, then restart wuzapi-mcp.');
       }
-      const { message, mimetype, data } = await fetchMedia(message_id, chat_jid);
+      const message = messageWithMedia(message_id, chat_jid);
       if (message.type !== 'voice' && message.type !== 'audio') return fail(`Message ${message_id} is a ${message.type}, not audio.`);
-      return text(await transcribe(config, { data, mimetype }));
+      try {
+        const { data, mimetype } = await media.get(message);
+        return text(await transcribe(config, { data, mimetype }));
+      } catch (err) {
+        if (err instanceof MediaExpiredError) return fail(err.message);
+        throw err;
+      }
     },
   );
 }

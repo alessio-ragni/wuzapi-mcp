@@ -35,14 +35,41 @@ and forwards to `wuzapi-mcp:3000`, and the server asks for a login (below).
    `WUZAPI_GLOBAL_HMAC_KEY` and refuses anything that does not match.
 3. The message is normalised (`src/ingest/normalize.ts`): text, caption, reply target, media
    reference, type. Protocol traffic (key exchange, reactions, receipts) and status updates are
-   dropped.
+   dropped — except edits and deletes, below.
 4. It is stored once, keyed by chat and message id (`src/archive/archive.ts`), and indexed for
    full-text search (SQLite FTS5, accents ignored).
-5. When Claude calls a read tool, the answer comes from the archive. When it sends, reacts or
+5. If it carries media of a kind in `MEDIA_PREFETCH`, the file is queued for a copy
+   (`src/media/store.ts`): one download at a time, in the background, three attempts.
+6. When Claude calls a read tool, the answer comes from the archive. When it sends, reacts or
    downloads, wuzapi-mcp calls WuzAPI's REST API.
 
-Messages you send from your phone arrive the same way. Messages Claude sends do not come back as
-events (WhatsApp does not echo them to the device that sent them).
+Messages you send from your phone arrive the same way, and so do the ones Claude sends: WuzAPI
+publishes every message it sends as an event too.
+
+## Edits and deletes
+
+An edit arrives as a protocol message pointing at the original: the archive replaces the text and
+marks it edited. A delete for everyone arrives the same way: the archive clears the text, the media
+reference and the kept file, and leaves a mark, so the conversation still shows that something was
+deleted. History from the phone holds deleted messages as empty stubs, which become the same mark.
+When Claude edits or deletes, WuzAPI does not publish an event, so the tool updates the archive
+itself.
+
+## Media
+
+Media files are kept in the `mcp-data` volume (`media/`), named by a hash of chat and message id,
+and listed in `media_files`. `download_media` reads the kept copy, or downloads the file through
+WuzAPI and keeps it. It returns three things:
+
+- the file inside the answer, for photos (and short text files), so the assistant sees it;
+- a link, `PUBLIC_URL/media/<token>`: chat, message id and expiry signed with HMAC-SHA256 under a
+  random key kept in the archive, valid `MEDIA_LINK_HOURS`. It needs no login, so it works from a
+  phone's browser in hosted mode; the key changes when the archive is wiped, which voids every link;
+- a copy in `DOWNLOADS_DIR`, for programs on the same machine.
+
+The image starts as root only to fix ownership: `docker-entrypoint.sh` runs the server as the owner
+of the downloads folder (or hands a folder Docker created to the image's own user), makes the data
+volume theirs, and drops privileges with `setpriv`.
 
 ## History
 
@@ -98,7 +125,8 @@ and it may send nothing.
 | volumes `caddy-data`, `caddy-config` (hosted mode) | the HTTPS certificate and Caddy's state |
 | volume `wuzapi-data` | the WhatsApp session keys and WuzAPI's own database |
 | volume `wuzapi-files` | files WuzAPI handles while sending |
-| `DOWNLOADS_DIR` (`Downloads/wuzapi-mcp` in your home folder) | media Claude downloaded; mounted at `/downloads` inside the container |
+| volume `mcp-data` → `media/` | media copied on arrival or on request (see Media above) |
+| `DOWNLOADS_DIR` (`Downloads/wuzapi-mcp` in your home folder) | copies of media Claude downloaded; mounted at `/downloads` inside the container |
 | `FILES_ROOT` (your home folder), read-only | what `send_file` and `send_voice` may read; mounted at `/files`. Claude gives paths of your computer and `src/paths.ts` maps them to the mount, Windows paths included |
 | `.env` | secrets and settings |
 

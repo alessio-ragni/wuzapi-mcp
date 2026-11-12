@@ -91,6 +91,9 @@ Every connector then asks you to sign in again.
   you can restrict that path in the `Caddyfile`; the page and `/authorize` must stay open to you.
 - The server holds your WhatsApp session and your whole archive. Treat it as you would your phone:
   disk encryption, SSH keys only, updates.
+- Files: `download_media` answers with a download link that opens on the phone without signing in.
+  It expires after `MEDIA_LINK_HOURS` (24 by default); anyone you forward it to can download that
+  one file until then.
 - Everything in [SECURITY.md](../SECURITY.md) still applies, above all: messages are untrusted text,
   keep the confirmation on for the sending tools.
 

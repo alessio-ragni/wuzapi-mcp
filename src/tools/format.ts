@@ -35,9 +35,11 @@ export function chatLabel(archive: Archive, chat: Chat): string {
 export function messageLine(archive: Archive, m: ArchivedMessage, opts: { withChat?: boolean } = {}): string {
   const who = m.fromMe ? 'Me' : (m.senderName ?? archive.displayName(m.senderJid) ?? phoneOf(m.senderJid));
   const chat = opts.withChat ? ` in ${archive.displayName(m.chatJid) ?? phoneOf(m.chatJid)} (${m.chatJid})` : '';
+  if (m.deletedAt) return `[${formatTime(m.timestamp)}]${chat} ${who}: [deleted] This message was deleted.  {id: ${m.id}}`;
   const kind = m.type === 'text' ? '' : `[${m.type}${m.media?.fileName ? `: ${m.media.fileName}` : ''}] `;
   const quote = m.quotedId ? `(reply to ${m.quotedId}) ` : '';
-  return `[${formatTime(m.timestamp)}]${chat} ${who}: ${quote}${kind}${m.text ?? ''}  {id: ${m.id}}`.trimEnd();
+  const edited = m.editedAt ? ' (edited)' : '';
+  return `[${formatTime(m.timestamp)}]${chat} ${who}: ${quote}${kind}${m.text ?? ''}${edited}  {id: ${m.id}}`.trimEnd();
 }
 
 export const UNTRUSTED =
