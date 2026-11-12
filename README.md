@@ -141,7 +141,7 @@ which is why there is no password. Do not publish those ports on a network. One 
 | **Your messages** | `edit_message`, `delete_message`, `pin_message`, `star_message` |
 | **Chats** | `manage_chat` — archive, unarchive, pin, unpin, mute, unmute, mark read, mark unread |
 | **Groups** | `list_groups`, `get_group_info`, `create_group`, `update_group` (name, description, photo, who sends, who edits, who adds, disappearing messages, approval), `update_group_participants`, `group_join_requests`, `get_group_invite_link`, `get_group_invite_info`, `join_group`, `leave_group` |
-| **People** | `check_whatsapp`, `get_contact_info` (about, business name, profile photo), `block_contact`, `set_about` |
+| **People** | `check_whatsapp`, `get_contact_info` (about, business name, profile photo), `block_contact` |
 | **Channels** | `list_channels`, `manage_channel` — follow, unfollow, mute, unmute |
 | **Media** | `download_media`, `transcribe_voice` |
 
@@ -177,7 +177,8 @@ Most clients ask before each tool call unless you allow it; keep that on for the
 blocking and group tools.
 
 Not included, on purpose: typing and online indicators, privacy settings, business labels, call
-handling, and buttons or lists (WhatsApp no longer shows them on ordinary accounts).
+handling, and buttons or lists (WhatsApp no longer shows them on ordinary accounts). Changing your
+own "about" text is left out too: WuzAPI 1.1.0 sends it, but WhatsApp refuses it.
 
 </details>
 

@@ -203,7 +203,7 @@ test('every tool is listed', async () => {
   for (const name of [
     'delete_message', 'edit_message', 'pin_message', 'star_message', 'vote_poll', 'manage_chat',
     'update_group', 'leave_group', 'get_group_invite_info', 'join_group', 'group_join_requests',
-    'check_whatsapp', 'get_contact_info', 'block_contact', 'set_about', 'list_channels', 'manage_channel',
+    'check_whatsapp', 'get_contact_info', 'block_contact', 'list_channels', 'manage_channel',
     'send_location', 'send_contact', 'send_sticker',
   ]) {
     assert.ok(tools.includes(name), name);

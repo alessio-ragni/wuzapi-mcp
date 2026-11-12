@@ -16,7 +16,7 @@ All notable changes to wuzapi-mcp are written here. The format follows
   `group_join_requests` lists, approves and rejects people asking to join; `get_group_invite_info`,
   `join_group` and `leave_group`.
 - People: `check_whatsapp`, `get_contact_info` (about, business name, profile photo),
-  `block_contact`, `set_about`. Channels: `list_channels`, `manage_channel`.
+  `block_contact`. Channels: `list_channels`, `manage_channel`.
 - Sending: @mentions and mention-all in `send_message`, `send_location`, `send_contact`,
   `send_sticker`.
 - Media is copied as it arrives (photos, voice notes, documents and stickers up to 25 MB by default;

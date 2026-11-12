@@ -135,6 +135,8 @@ Two more, reported upstream, limit what can be offered:
   instead.
 - **Archive, pin and mute made on the phone are not forwarded.** wuzapi-mcp can archive, pin and
   mute chats, but cannot tell which chats you archived elsewhere.
+- **Setting your "about" text fails.** `/status/set/text` gets `graphql error: 400 Bad Request` from
+  WhatsApp, so wuzapi-mcp offers no tool for it.
 
 ## Starting over
 

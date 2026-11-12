@@ -22,7 +22,7 @@ async function fetchPicture(url: string): Promise<{ data: Buffer; mimeType: stri
   }
 }
 
-/** People and profile: who has WhatsApp, who someone is, blocking, your own "about"; and channels. */
+/** People: who has WhatsApp, who someone is, blocking; and channels. */
 export function registerPeopleTools(server: McpServer, archive: Archive, wuzapi: Wuzapi): void {
   const label = (jid: string) => `${archive.displayName(jid) ?? phoneOf(jid)} (${phoneOf(jid)})`;
 
@@ -44,7 +44,11 @@ export function registerPeopleTools(server: McpServer, archive: Archive, wuzapi:
             const u = byQuery.get(p);
             if (!u) return `${p}: no answer`;
             if (!u.IsInWhatsapp) return `${p}: not on WhatsApp`;
-            return `${p}: on WhatsApp (${bareJid(u.JID)})${u.VerifiedName ? ` — business: ${u.VerifiedName}` : ''}`;
+            const pn = `${p}@s.whatsapp.net`;
+            // WhatsApp may answer with the privacy LID: remember the pair, show the number.
+            const jid = bareJid(u.JID);
+            if (jid.endsWith('@lid') && archive.resolveJid(jid) !== pn) archive.recordLid(pn, jid);
+            return `${p}: on WhatsApp (${pn})${u.VerifiedName ? ` — business: ${u.VerifiedName}` : ''}`;
           })
           .join('\n'),
       );
@@ -105,20 +109,6 @@ export function registerPeopleTools(server: McpServer, archive: Archive, wuzapi:
     },
   );
 
-  server.registerTool(
-    'set_about',
-    {
-      title: 'Set your about text',
-      description: 'Change the "about" line on your own WhatsApp profile, the one your contacts see.',
-      inputSchema: { text: z.string().min(1).max(139) },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-    },
-    async ({ text: about }) => {
-      await wuzapi.setAbout(about);
-      return text(`Your about now reads: ${about}`);
-    },
-  );
-
   // --- channels ------------------------------------------------------------------
 
   server.registerTool(
@@ -136,7 +126,9 @@ export function registerPeopleTools(server: McpServer, archive: Archive, wuzapi:
         channels
           .map((c) => {
             const t = c.thread_metadata ?? {};
-            const followers = t.subscribers_count !== undefined ? ` — ${Number(t.subscribers_count).toLocaleString('en')} followers` : '';
+            // WhatsApp often answers 0 for channels you only follow: show the count only when it says something.
+            const count = Number(t.subscribers_count ?? 0);
+            const followers = count > 0 ? ` — ${count.toLocaleString('en')} followers` : '';
             const muted = c.viewer_metadata?.mute === 'on' ? ' [muted]' : '';
             const role = c.viewer_metadata?.role && c.viewer_metadata.role !== 'subscriber' ? ` [${c.viewer_metadata.role}]` : '';
             const link = t.invite ? `\n  https://whatsapp.com/channel/${t.invite}` : '';

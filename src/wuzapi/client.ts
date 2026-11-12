@@ -505,11 +505,6 @@ export class Wuzapi {
     return data?.Blocklist ?? [];
   }
 
-  /** Your own "about" text. */
-  setAbout(text: string): Promise<unknown> {
-    return this.call('POST', '/status/set/text', { body: { Body: text } });
-  }
-
   // --- channels ----------------------------------------------------------------
 
   async channels(): Promise<Channel[]> {
