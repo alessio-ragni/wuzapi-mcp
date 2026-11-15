@@ -99,7 +99,7 @@ The page shows the problem under *Archive* while it lasts.
 
 ## Hosted mode
 
-- **claude.ai says "Couldn't reach the MCP server".** From any computer, `curl -sI https://your.host/mcp`
+- **claude.ai says "Couldn't reach the MCP server".** From any computer, `curl -si -X POST https://your.host/mcp`
   must answer `401` with a `WWW-Authenticate` header, and
   `curl -s https://your.host/.well-known/oauth-protected-resource/mcp` must return JSON. If the
   name does not resolve, fix the DNS record; if the connection fails, ports 80 and 443 are not open
