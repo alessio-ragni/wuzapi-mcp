@@ -6,7 +6,7 @@
 
 Search years of chats in a second, catch up on the groups you muted, see who answered your poll,
 reply, send files and voice notes, and set up a group — just by asking.
-**Private by design: everything runs on your own computer.**
+**Private by design: everything runs on your own computer — or on your own server.**
 
 [![Release](https://img.shields.io/github/v/release/alessio-ragni/wuzapi-mcp?include_prereleases&sort=semver)](https://github.com/alessio-ragni/wuzapi-mcp/releases)
 [![CI](https://github.com/alessio-ragni/wuzapi-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/alessio-ragni/wuzapi-mcp/actions/workflows/ci.yml)
@@ -205,7 +205,7 @@ docker compose pull
 docker compose up -d
 ```
 
-To stay on a version, set `WUZAPI_MCP_VERSION=0.1.0` in `.env`. Changes are listed in
+To stay on a version, set `WUZAPI_MCP_VERSION=0.5.0` in `.env`. Changes are listed in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Uninstall

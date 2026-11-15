@@ -128,7 +128,7 @@ wuzapi-mcp works around these in WuzAPI 1.1.0; they are reported upstream.
   wuzapi-mcp's own page shows the QR.
   ([asternic/wuzapi#394](https://github.com/asternic/wuzapi/issues/394))
 
-Two more, reported upstream, limit what can be offered:
+Three more limit what can be offered:
 
 - **No media retry.** whatsmeow can ask the phone to upload an expired file again, but WuzAPI has
   no endpoint for it, so expired media cannot be recovered; wuzapi-mcp copies media on arrival
