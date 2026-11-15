@@ -6,6 +6,8 @@ All notable changes to wuzapi-mcp are written here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-15
+
 ### Added
 - Delete messages for everyone (`delete_message`: your own, and other people's in groups you
   administer), edit your messages (`edit_message`), pin and star them (`pin_message`,
